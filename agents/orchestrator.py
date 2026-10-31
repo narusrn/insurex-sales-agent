@@ -15,6 +15,11 @@ from .subgraphs.rag import graph as rag_subgraph
 from .tools import extract_lead_info, handoff_to_kb_retriever, save_lead
 
 CHECKPOINT_DB_PATH = Path(__file__).resolve().parent.parent / "db" / "checkpoints.sqlite"
+CHECKPOINT_DB_PATH.parent.mkdir(parents=True, exist_ok=True)  # db/ is gitignored, never committed —
+# on a fresh clone (confirmed the hard way on Streamlit Cloud) nothing else creates it before
+# SqliteSaver/AsyncSqliteSaver.from_conn_string() tries to open a file inside a directory that
+# doesn't exist yet, which sqlite3 can't do. Worked locally only because db/ already existed from
+# earlier test runs. Same mkdir-before-connect pattern tools.py's _init_leads_db() already uses.
 GRAPH_MAX_STEPS = int(os.environ.get("GRAPH_MAX_STEPS", "3"))
 FALLBACK_MESSAGE = "ขออภัยค่ะ ระบบไม่สามารถประมวลผลคำถามนี้ได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง"
 

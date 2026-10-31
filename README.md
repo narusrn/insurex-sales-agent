@@ -255,6 +255,7 @@ key client-side (kept in `sessionStorage` for the tab) and sends it as
 | `POST` | `/chat` | `X-API-Key` | The chat endpoint (below) |
 | `GET` | `/runs` | `X-API-Key` | JSON dump of `db/runs.jsonl` (newest first, capped to 500) — powers `/dashboard` |
 | `GET` | `/dashboard` | — (public) | Usage dashboard: total runs, success rate, avg latency, a table of every run |
+| `GET` | `/chat-test` | — (public) | A live chat UI for manually testing `/chat` (below) |
 
 **`POST /chat`** — header `X-API-Key: <API_KEY>` required.
 
@@ -291,6 +292,27 @@ nothing renders until a valid key is submitted, same gate as calling `/runs`
 directly.
 
 ![Usage dashboard](Data/dashboard-screenshot.png)
+
+---
+
+## Live chat test page
+
+`GET /chat-test` (`api/static/chat_test.html`) — a self-contained HTML page
+for manually exercising `/chat` from a browser, no backend framework needed
+to view it: open it either via the running server (`http://localhost:8000/chat-test`)
+or directly as a local file (`file:///...` — the API has CORS enabled
+specifically so this works cross-origin from a `file://` page, confirmed
+necessary: without it the browser blocks the fetch before the request even
+reaches the API key check).
+
+Fill in the **Base URL** (defaults to `http://127.0.0.1:8000`) and your
+**X-API-Key**, then chat — real token-by-token streaming via `fetch` +
+`ReadableStream` (not `EventSource`, since sending a custom header on a POST
+isn't possible with `EventSource`), with a live status line while a tool is
+running. `session_id` is generated client-side (`crypto.randomUUID()`); "เริ่ม
+บทสนทนาใหม่" starts a fresh one.
+
+![Live chat test](Data/chat-test-screenshot.png)
 
 ---
 
@@ -483,28 +505,7 @@ uvicorn api.main:app --reload
 
 # 5. Run the full evaluation suite (regenerates eval/demo_log.txt)
 python -m eval.run_full_eval
-
-# 6. (optional) Run the Streamlit chat UI — calls agents.runner directly, no need
-#    for the API above to be running at all
-streamlit run streamlit_app.py
-# -> http://localhost:8501 — enter your API_KEY in the sidebar to unlock the chat
 ```
-
-### Deploying the chat UI to Streamlit Cloud
-
-`streamlit_app.py` runs standalone (no `api/` needed). On
-[share.streamlit.io](https://share.streamlit.io): point it at this repo,
-main file `streamlit_app.py`, then under **Settings → Secrets** paste:
-
-```toml
-OPENAI_API_KEY = "sk-..."
-API_KEY = "..."          # same key you'd use locally — the sidebar gate
-```
-
-(or the `LLM_PROVIDER`/`AZURE_OPENAI_*` block instead, for Azure). No `.env`
-file is deployed there — `st.secrets` is mirrored into `os.environ` at
-startup, which every other module already reads from, so nothing else needs
-to change for Cloud specifically.
 
 ### Testing the API directly
 

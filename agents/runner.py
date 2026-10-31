@@ -8,7 +8,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from langchain_core.messages import AIMessageChunk, HumanMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from .orchestrator import CHECKPOINT_DB_PATH, build_graph
@@ -35,6 +35,27 @@ def _log_run(session_id: str, message: str, reply: str, tools_used: list[str], l
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception:
         pass
+
+
+async def get_history(session_id: str) -> list[dict]:
+    """User-facing chat history for a session — [{"role": "user"/"assistant", "content": ...}],
+    chronological. Reads straight from the checkpointer, no separate storage. Filters to
+    HumanMessage and supervisor's own AIMessages only: a tool-call-only AIMessage has no content
+    (already excluded by the `m.content` check), and after_retrieve_node's bridge note is
+    excluded by its `name` tag (orchestrator.py) — neither is something a customer ever saw,
+    so neither belongs in a chat-history view. An unused session_id returns [] (confirmed
+    directly: aget_state on a fresh thread_id returns an empty StateSnapshot, not an error)."""
+    async with AsyncSqliteSaver.from_conn_string(str(CHECKPOINT_DB_PATH)) as checkpointer:
+        graph = build_graph().compile(checkpointer=checkpointer)
+        snapshot = await graph.aget_state({"configurable": {"thread_id": session_id}})
+        messages = (snapshot.values or {}).get("messages", [])
+        history = []
+        for m in messages:
+            if isinstance(m, HumanMessage) and m.content:
+                history.append({"role": "user", "content": m.content})
+            elif isinstance(m, AIMessage) and m.content and m.name != "after_retrieve_bridge":
+                history.append({"role": "assistant", "content": m.content})
+        return history
 
 
 async def astream_turn(session_id: str, user_message: str):

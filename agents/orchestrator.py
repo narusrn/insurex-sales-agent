@@ -107,7 +107,13 @@ def after_retrieve_node(state: GraphState) -> dict:
             "(ข้อความด้านล่างนี้คือสิ่งที่ค้นเจอ แต่ถูกประเมินว่าอาจไม่ตรงประเด็น — "
             "ห้ามสรุปตัวเลข/เงื่อนไขเฉพาะเจาะจงจากข้อมูลนี้อย่างมั่นใจ ให้บอกลูกค้าตรงๆ ว่าไม่พบข้อมูลที่ชัดเจนแทน):\n" + header
         )
-    note = AIMessage(content="{}\n{}".format(header, "\n---\n".join(snippets)))
+    # name="after_retrieve_bridge" tags this as an internal note, not a real reply — needed so
+    # anything reading `messages` for user-facing chat history (agents.runner.get_history) can
+    # tell it apart from supervisor's own AIMessages, which are the only ones ever shown to a
+    # customer. Found necessary the same way the token-stream leak was: this message has real
+    # content, so a naive "AIMessage with content = an assistant turn" filter would wrongly surface
+    # "Retrieved N snippet(s): ..." as something the agent said to the user.
+    note = AIMessage(content="{}\n{}".format(header, "\n---\n".join(snippets)), name="after_retrieve_bridge")
     return {"messages": [note]}
 
 

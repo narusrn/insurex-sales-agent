@@ -253,6 +253,7 @@ key client-side (kept in `sessionStorage` for the tab) and sends it as
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | `POST` | `/chat` | `X-API-Key` | The chat endpoint (below) |
+| `GET` | `/chat/{session_id}` | `X-API-Key` | That session's chat history, `[{"role": "user"/"assistant", "content": ...}, ...]` — reads straight from the checkpointer, `[]` for an unused `session_id` |
 | `GET` | `/runs` | `X-API-Key` | JSON dump of `db/runs.jsonl` (newest first, capped to 500) — powers `/dashboard` |
 | `GET` | `/dashboard` | — (public) | Usage dashboard: total runs, success rate, avg latency, a table of every run |
 | `GET` | `/chat-test` | — (public) | A live chat UI for manually testing `/chat` (below) |
@@ -275,6 +276,19 @@ data: {"type": "token", "content": "สุข"}
 event: done
 data: {"session_id": "any-string-you-pick"}
 ```
+
+**`GET /chat/{session_id}`** — header `X-API-Key: <API_KEY>` required.
+
+```json
+[
+  { "role": "user", "content": "Health Plus มีแผนอะไรบ้าง" },
+  { "role": "assistant", "content": "ประกันสุขภาพ InsureX Health Plus มีแผนหลัก ๆ ดังนี้: ..." }
+]
+```
+
+Internal-only messages are filtered out — `extract_lead_info`/`save_lead`'s
+raw tool results, and `after_retrieve_node`'s "Retrieved N snippet(s)"
+bridge note, never appear here since a customer never saw either one either.
 
 ---
 

@@ -106,24 +106,74 @@ written later, update these citations to point at it.
    from `eval/demo_log.txt`, not a cleaned-up paraphrase.
 
 8. **A real conversation, start to finish** — `assets/lead-collection-conversation.png`,
-   a live-captured run (not staged): greeting → product question → stated
-   interest → step-by-step info gathering (Supervisor asks specifically for
-   the one missing field, not all 4 again) → confirm → saved. Pair it with
-   `session-01`/`session-02`'s transcript (`README.md` "Demo transcripts") if
-   there's room: a second session has zero knowledge of the first's name
-   (`sess-B` can't answer "what's my name"), and the *same* session correctly
-   recalls "the cheapest plan" refers to Health Plus from two turns earlier —
-   both verified directly against `checkpoints.sqlite`, not just the reply
-   text.
+   a live-captured run (session `fda66787-98d8-4e79-95aa-c110f82e94f6`, not
+   staged — reproduce fresh via `GET /api/v1/chat/fda66787-...` or by replaying
+   the same 6 messages through `/api/v1/chat-test` if `db/checkpoints.sqlite`
+   has moved on by presentation time). The actual speaker-labeled trace, same
+   convention as `README.md`'s "Demo transcripts", straight from that
+   session's own `db/runs.jsonl` record — don't invent a cleaner-looking one:
+   ```
+   Supervisor      สวัสดีครับ! มีอะไรให้ช่วยเหลือเกี่ยวกับประกันหรือผลิตภัณฑ์
+                   ของ InsureX ไหมครับ?
+   Supervisor      ลูกค้าสอบถามเกี่ยวกับแผนประกันที่มี -- ค้นข้อมูลในฐานความรู้
+   RAG Agent       ค้นข้อมูลด้วยคำค้น "แผนประกัน" -- พบ 2 ข้อความ, เกี่ยวข้อง ✅
+   Supervisor      เรามีแผนประกันหลักๆ ดังนี้ครับ: 1. InsureX Life Secure...
+                   2. InsureX Health Plus...
+   Lead Extractor  {"name":null,"occupation":null,"income":null,"phone":null,
+                    "interested_product":"InsureX Health Plus", ...}
+   Supervisor      คุณสนใจประกันสุขภาพ InsureX Health Plus ครับ ขอข้อมูล
+                   เพิ่มเติมหน่อยนะครับ: 1. ชื่อ 2. อาชีพ 3. รายได้ 4. เบอร์โทร
+   Lead Extractor  {"name":"สมชาย ใจดี","occupation":"วิศวกรซอฟต์แวร์",
+                    "income":"45,000 บาทต่อเดือน","phone":null, ...}
+   Supervisor      ข้อมูลที่ได้จากคุณ: ชื่อ สมชาย ใจดี, อาชีพ วิศวกรซอฟต์แวร์,
+                   รายได้ 45,000 บาทต่อเดือน -- ยังขาดเบอร์โทรศัพท์ครับ
+   Lead Saver      Data complete but not yet confirmed (name=สมชาย ใจดี,
+                   occupation=วิศวกรซอฟต์แวร์, income=45,000 บาทต่อเดือน,
+                   phone=0812345678). Restate and ask to confirm.
+   Supervisor      ข้อมูลที่เรามีตอนนี้คือ: ... กรุณายืนยันข้อมูลเหล่านี้ว่า
+                   ถูกต้องหรือไม่ครับ?
+   Lead Saver      Lead saved (id=5)
+   Supervisor      ข้อมูลของคุณได้ถูกบันทึกเรียบร้อยแล้วครับ!
+   ```
+   The point for the slide: `extract_lead_info` ran twice (fields arrive
+   incrementally — product first, then name/occupation/income, phone still
+   missing), `save_lead` was only ever called *after* `extract_lead_info`
+   reported complete data, and it refused to persist on the first complete
+   call — exactly the two gates from slide 5, visibly firing in a real run,
+   not asserted in the abstract. Pair with `session-01`/`session-02`'s
+   transcript (`README.md` "Demo transcripts") if there's room: a second
+   session has zero knowledge of the first's name (`sess-B` can't answer
+   "what's my name"), and the *same* session correctly recalls "the cheapest
+   plan" refers to Health Plus from two turns earlier — both verified
+   directly against `checkpoints.sqlite`, not just the reply text.
 
 9. **It runs, with real usage data** — `assets/dashboard-screenshot.png` +
    `assets/dashboard-expanded.png` (click-to-expand trace + per-node token
-   breakdown). One line: every `/api/v1/chat` turn logs real `usage_metadata`
-   from every LLM call in that turn — not just Supervisor's own, also
+   breakdown). Every `/api/v1/chat` turn appends one record to
+   `db/runs.jsonl` — this is the final turn of the same session as slide 8's
+   transcript (`db/runs.jsonl`, trimmed to the fields worth putting on a
+   slide):
+   ```json
+   {
+     "session_id": "fda66787-98d8-4e79-95aa-c110f82e94f6",
+     "message": "ยืนยันครับ ถูกต้อง",
+     "tools_used": ["save_lead"],
+     "latency": 2.75,
+     "llm_calls": 2,
+     "usage": {"input_tokens": 5123, "output_tokens": 129, "total_tokens": 5252},
+     "estimated_cost_usd": 0.000846,
+     "cost_note": "approximate -- hardcoded gpt-4o-mini per-token rates, may not reflect current pricing"
+   }
+   ```
+   One line: `usage.total_tokens` is summed from real `usage_metadata` on
+   every LLM call that turn — not just Supervisor's own, also
    `grade_documents`, `extract_lead_info`'s structured-output call, every
-   call inside the RAG subgraph — summed and priced against a small
+   call inside the RAG subgraph when it runs — priced against a small
    hand-maintained rate table, explicitly labeled approximate rather than
-   presented as exact (`README.md` "Usage dashboard").
+   presented as exact (`README.md` "Usage dashboard"). The full `trace` array
+   (what slide 8's transcript is built from) and `usage.by_node` breakdown
+   are both in the same record, one click away in the dashboard's expanded
+   row view — that's what `dashboard-expanded.png` is a screenshot of.
 
 10. **Two ways to drive it** — `assets/chat-test-screenshot.png`
     (`/api/v1/chat-test`, a self-contained HTML page with real token-by-token

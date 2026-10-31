@@ -1,8 +1,14 @@
 """Phase 5.4 — full pass over all 21 golden cases (13 qa + 6 lead + 2 session).
 Writes eval/demo_log.txt: pass/fail per case + render_dialogue(trace) for each run —
-this log IS the brief's "Demo/Test Case" deliverable. Retrieval metrics (Hit Rate@k,
-MRR) computed via eval.metrics.aggregate() for qa_cases with expected_source_docs.
-See implementation-plan.md §5.4.
+this log IS the brief's "Demo/Test Case" deliverable. Three separate layers for
+qa_cases, each answering a different question, not one blended score:
+retrieval metrics (Hit Rate@k, MRR, eval.metrics.aggregate()) — did it find the
+right document; the strict keypoint substring check — does the reply contain
+the exact expected phrases; eval.judge.judge_groundedness() — an independent
+LLM call grading whether the reply is faithful to what was actually retrieved,
+with no pre-written expected answer, since a correct reply can be phrased many
+ways and the strict keypoint check alone can't tell that apart from a wrong
+one. See implementation-plan.md §5.4.
 """
 import json
 import sqlite3
@@ -21,6 +27,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from agents.orchestrator import CHECKPOINT_DB_PATH, build_graph
 from agents.tools import LEADS_DB_PATH
 from agents.trace import render_dialogue
+from eval.judge import judge_groundedness
 from eval.metrics import aggregate, extract_sources
 
 DATASET_PATH = ROOT / "eval" / "golden_dataset.json"
@@ -28,7 +35,7 @@ LOG_PATH = ROOT / "eval" / "demo_log.txt"
 
 
 def run_qa_cases(graph, cases, log):
-    results, retrieval_pairs = [], []
+    results, retrieval_pairs, judge_results = [], [], []
     for case in cases:
         state = graph.invoke({
             "session_id": f"demo-{case['id']}",
@@ -49,17 +56,29 @@ def run_qa_cases(graph, cases, log):
         if case["expected_source_docs"]:
             retrieval_pairs.append((case["expected_source_docs"], retrieved))
 
+        # LLM-as-judge: independent of the keypoint check above, and with no pre-written
+        # expected answer to match against -- graded fresh each run against whatever was
+        # actually retrieved this run, same reasoning §4's own note explains. Skipped when
+        # nothing was retrieved (qa-13, small talk) -- nothing to judge groundedness against.
+        verdict = None
+        snippets = state.get("snippets") or []
+        if snippets:
+            verdict = judge_groundedness(reply, snippets)
+            judge_results.append((case["id"], verdict.grounded))
+
         results.append((case["id"], passed))
         print(f"\n{'=' * 70}", file=log)
         print(f"{case['id']} [{case['difficulty']}] — {'PASS' if passed else 'FAIL'}{note}", file=log)
         print(f"Query: {case['query']}", file=log)
         print(f"Expected keypoints: {case['expected_answer_keypoints']}", file=log)
         print(f"Expected source docs: {case['expected_source_docs']}  |  Actually retrieved: {retrieved}", file=log)
+        if verdict is not None:
+            print(f"LLM-judge groundedness: {'GROUNDED' if verdict.grounded else 'NOT GROUNDED'} — {verdict.rationale}", file=log)
         print("--- trace ---", file=log)
         print(render_dialogue(state["trace"]), file=log)
         print("--- final reply ---", file=log)
         print(reply, file=log)
-    return results, retrieval_pairs
+    return results, retrieval_pairs, judge_results
 
 
 def run_lead_cases(graph, cases, log):
@@ -148,7 +167,7 @@ def main():
         print(f"{len(dataset['qa_cases'])} qa_cases + {len(dataset['lead_cases'])} lead_cases + "
               f"{len(dataset['session_cases'])} session_cases = 21 total\n", file=log)
 
-        qa_results, retrieval_pairs = run_qa_cases(graph, dataset["qa_cases"], log)
+        qa_results, retrieval_pairs, judge_results = run_qa_cases(graph, dataset["qa_cases"], log)
         lead_results = run_lead_cases(graph, dataset["lead_cases"], log)
         session_results = run_session_cases(dataset["session_cases"], log)
 
@@ -170,6 +189,13 @@ def main():
         print(f"\nRetrieval metrics ({metrics['n_cases']} qa_cases with expected_source_docs): "
               f"Hit Rate@k = {metrics['hit_rate_at_k']:.2f}, MRR = {metrics['mrr']:.2f}", file=log)
 
+        n_grounded = sum(1 for _, g in judge_results if g)
+        print(f"\nLLM-as-judge groundedness ({len(judge_results)} qa_cases that retrieved "
+              f"something): {n_grounded}/{len(judge_results)} grounded", file=log)
+        for case_id, grounded in judge_results:
+            if not grounded:
+                print(f"  NOT GROUNDED: {case_id}", file=log)
+
         print(f"\n{'=' * 70}", file=log)
         print("leads.sqlite — SELECT * proof (Bonus 1 output; file itself is gitignored)", file=log)
         print(f"{'=' * 70}", file=log)
@@ -178,6 +204,7 @@ def main():
 
     print(f"done — {n_pass}/{len(all_results)} passed, log written to {LOG_PATH}")
     print(f"retrieval: hit_rate@k={metrics['hit_rate_at_k']:.2f} mrr={metrics['mrr']:.2f}")
+    print(f"llm-judge groundedness: {n_grounded}/{len(judge_results)}")
 
 
 if __name__ == "__main__":

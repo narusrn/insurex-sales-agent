@@ -87,25 +87,35 @@ written later, update these citations to point at it.
    zero code-level fallback left to catch a misread, so a pass here is a real
    result, not a formality.
 
-7. **Eval harness — real numbers, not cherry-picked.** `eval/golden_dataset.json`
-   (13 `qa_cases` across easy/hard/out_of_scope/multi_hop + 6 `lead_cases` +
-   2 `session_cases`) run via `python -m eval.run_full_eval`, full transcripts
-   + pass/fail in `eval/demo_log.txt`. Report the real last-run numbers:
-   - **16/21 overall.** `lead_cases` and `session_cases` both **100%** (6/6,
-     2/2) — the completeness/confirmation/isolation gates held on every case.
-     `qa_cases` **8/13 (61.5%)** on strict keypoint substring-match — worth
-     stating plainly, not left implicit: **4 of the 5 `qa` failures
-     (`qa-06`, `qa-09`, `qa-11`, `qa-12`) are the honest-fallback behavior
-     from slide 5 firing correctly**, not wrong answers — the agent ran its
-     full retry budget and said "I don't know, contact an agent" instead of
-     guessing. The 5th (`qa-02`) actually retrieved the right premium figure
-     (6,800 บาท, matching the expected keypoint) but missed a secondary
-     phrasing keypoint — a strict-grading near-miss, not a factual error.
-   - **Retrieval quality, separately**: Hit Rate@k = 0.91, MRR = 0.86 over the
-     11 `qa_cases` with a known expected source doc — a more lenient measure
-     of "did it find the right document" than the strict keypoint match
-     above, and the number that actually isolates retrieval quality from
-     generation quality.
+7. **Eval harness — three separate layers, real numbers, not cherry-picked.**
+   `eval/golden_dataset.json` (13 `qa_cases` across
+   easy/hard/out_of_scope/multi_hop + 6 `lead_cases` + 2 `session_cases`) run
+   via `python -m eval.run_full_eval`, full transcripts + pass/fail in
+   `eval/demo_log.txt`. Worth stating plainly that `qa_cases` are graded
+   three *different* ways, answering three different questions — not one
+   blended score (`README.md` "Eval harness — three separate layers"):
+   - **Pass/fail, overall: 16/21.** `lead_cases` and `session_cases` both
+     **100%** (6/6, 2/2) — the completeness/confirmation/isolation gates held
+     on every case. `qa_cases` **8/13 (61.5%)** on strict keypoint
+     substring-match — **4 of the 5 `qa` failures (`qa-06`, `qa-09`,
+     `qa-11`, `qa-12`) are the honest-fallback behavior from slide 5 firing
+     correctly**, not wrong answers — the agent ran its full retry budget and
+     said "I don't know, contact an agent" instead of guessing.
+   - **Retrieval accuracy** (`eval/metrics.py`): Hit Rate@k = 0.91, MRR =
+     0.86 over the 11 `qa_cases` with a known expected source doc — isolates
+     "did it find the right document" from generation quality.
+   - **LLM-as-judge groundedness** (`eval/judge.py`, new): a second,
+     independent LLM call grades whether the reply is faithful to what was
+     *actually retrieved that run* — no pre-written expected answer, since a
+     correct reply can be phrased many ways. **11/12** qa cases that
+     retrieved something. The one miss is the honest, interesting result for
+     this slide: `qa-02` reads the premium for a 35-year-old off the
+     retrieved "age 31–40" bracket row — arithmetically correct, but the
+     judge flagged it as not *explicitly* stated for age 35 — a real
+     strictness call about what "grounded" means, kept as-is rather than
+     loosened to make the number look better. (This is also the same case
+     the strict keypoint check above fails, for an unrelated reason — a
+     missed secondary phrase — worth not conflating the two on the slide.)
 
 8. **The agentic RAG retriever** — `assets/graph-retriever.png` (the same
    nested subgraph visible inside `graph.png`'s xray view, isolated on its

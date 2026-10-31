@@ -43,8 +43,9 @@ api/
 eval/
 ├── golden_dataset.json     # 13 qa_cases + 6 lead_cases + 2 session_cases
 ├── metrics.py                 # Hit Rate@k, MRR — standard IR metrics, no new dependency
-├── run_full_eval.py             # Runs the full 21-case suite, writes demo_log.txt
-└── demo_log.txt                   # Full transcripts + pass/fail — THE demo/test-case deliverable
+├── judge.py                      # LLM-as-judge: is the reply grounded in what was retrieved?
+├── run_full_eval.py                # Runs the full 21-case suite, writes demo_log.txt
+└── demo_log.txt                      # Full transcripts + pass/fail — THE demo/test-case deliverable
 Data/pdfs/                 # 5 synthetic Thai knowledge-base PDFs (self-authored, InsureX didn't provide real ones)
 db/                        # gitignored: leads.sqlite, checkpoints.sqlite (created on first run)
 tests/test_graph_smoke.py  # One assert-based smoke test
@@ -363,6 +364,32 @@ Full run: [`eval/demo_log.txt`](eval/demo_log.txt) (21 cases, regenerate with
 `python -m eval.run_full_eval`). A representative sample below, trimmed with
 `...` where a reply repeats a pattern already shown — the linked file has
 every case in full, untrimmed.
+
+### Eval harness — three separate layers, not one blended score
+
+Each `qa_case` is graded three different ways, answering three different
+questions:
+
+- **Retrieval accuracy** ([`eval/metrics.py`](eval/metrics.py)) — did it find
+  the right document? Hit Rate@k and MRR against `expected_source_docs`,
+  over the 11 `qa_cases` that have one. **Hit Rate@k = 0.91, MRR = 0.86.**
+- **Strict keypoint match** (`run_qa_cases()` in
+  [`eval/run_full_eval.py`](eval/run_full_eval.py)) — does the reply contain
+  the exact expected phrases, as a deterministic substring check. **8/13**
+  — see "Demo transcripts" below; 4 of the 5 misses are the honest-fallback
+  behavior working correctly, not wrong answers.
+- **LLM-as-judge groundedness** ([`eval/judge.py`](eval/judge.py)) — a
+  second, independent LLM call grading whether the reply is faithful to what
+  was *actually retrieved this run*, with no pre-written expected answer to
+  match against (a correct reply can be phrased many ways, so the real
+  retrieved text is the ground truth, not a stored string). **11/12** qa
+  cases that retrieved something. The one miss is a real, honest finding,
+  not a bug: `qa-02` states the premium for a 35-year-old by reading it off
+  the "age 31–40" bracket in the retrieved table — arithmetically correct,
+  but the judge flagged it as not *explicitly* stated for age 35 specifically
+  — a legitimate strictness call about what "grounded" means, not a
+  hallucination, and left as-is rather than loosening the judge prompt to
+  make the number look better.
 
 <details>
 <summary><b>qa-01</b> — easy, single-doc retrieval (PASS)</summary>

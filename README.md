@@ -290,6 +290,8 @@ Enter your `API_KEY` in the field at the top of the page to load the data —
 nothing renders until a valid key is submitted, same gate as calling `/runs`
 directly.
 
+![Usage dashboard](Data/dashboard-screenshot.png)
+
 ---
 
 ## Demo transcripts

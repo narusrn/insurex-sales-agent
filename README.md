@@ -483,7 +483,28 @@ uvicorn api.main:app --reload
 
 # 5. Run the full evaluation suite (regenerates eval/demo_log.txt)
 python -m eval.run_full_eval
+
+# 6. (optional) Run the Streamlit chat UI — calls agents.runner directly, no need
+#    for the API above to be running at all
+streamlit run streamlit_app.py
+# -> http://localhost:8501 — enter your API_KEY in the sidebar to unlock the chat
 ```
+
+### Deploying the chat UI to Streamlit Cloud
+
+`streamlit_app.py` runs standalone (no `api/` needed). On
+[share.streamlit.io](https://share.streamlit.io): point it at this repo,
+main file `streamlit_app.py`, then under **Settings → Secrets** paste:
+
+```toml
+OPENAI_API_KEY = "sk-..."
+API_KEY = "..."          # same key you'd use locally — the sidebar gate
+```
+
+(or the `LLM_PROVIDER`/`AZURE_OPENAI_*` block instead, for Azure). No `.env`
+file is deployed there — `st.secrets` is mirrored into `os.environ` at
+startup, which every other module already reads from, so nothing else needs
+to change for Cloud specifically.
 
 ### Testing the API directly
 

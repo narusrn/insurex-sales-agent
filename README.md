@@ -37,7 +37,7 @@ agents/
     └── rag.py                                     # Agentic RAG: generate_query_or_respond, retrieve, grade, rewrite
 api/
 ├── main.py                 # FastAPI app, one router
-├── routes/chat.py            # POST /chat — thin, hands off to agents.runner.stream_events
+├── routes/chat.py            # POST /api/v1/chat — thin, hands off to agents.runner.stream_events
 └── schemas/chat.py             # SessionChatRequest{message, session_id}
 eval/
 ├── golden_dataset.json     # 13 qa_cases + 6 lead_cases + 2 session_cases
@@ -244,21 +244,24 @@ genuinely saves the in-flight LLM cost, not just in theory.
 
 ## API reference
 
-Full interactive docs at `/docs` (Swagger) once running. `/chat` and `/runs`
-require an `X-API-Key` header (checked against the `API_KEY` env var); `/dashboard`
-itself is public — it's a static page with no data baked in, it asks for the
-key client-side (kept in `sessionStorage` for the tab) and sends it as
-`X-API-Key` on its own `/runs` fetch.
+Full interactive docs at `/docs` (Swagger) once running. API endpoints live
+under `/api/v1` (matching the reference API's own convention); the two static
+pages (`/dashboard`, `/chat-test`) don't, since they're pages, not API calls.
+`/api/v1/chat` and `/api/v1/runs` require an `X-API-Key` header (checked
+against the `API_KEY` env var); `/dashboard` itself is public — it's a static
+page with no data baked in, it asks for the key client-side (kept in
+`sessionStorage` for the tab) and sends it as `X-API-Key` on its own
+`/api/v1/runs` fetch.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| `POST` | `/chat` | `X-API-Key` | The chat endpoint (below) |
-| `GET` | `/chat/{session_id}` | `X-API-Key` | That session's chat history, `[{"role": "user"/"assistant", "content": ...}, ...]` — reads straight from the checkpointer, `[]` for an unused `session_id` |
-| `GET` | `/runs` | `X-API-Key` | JSON dump of `db/runs.jsonl` (newest first, capped to 500) — powers `/dashboard` |
+| `POST` | `/api/v1/chat` | `X-API-Key` | The chat endpoint (below) |
+| `GET` | `/api/v1/chat/{session_id}` | `X-API-Key` | That session's chat history, `[{"role": "user"/"assistant", "content": ...}, ...]` — reads straight from the checkpointer, `[]` for an unused `session_id` |
+| `GET` | `/api/v1/runs` | `X-API-Key` | JSON dump of `db/runs.jsonl` (newest first, capped to 500) — powers `/dashboard` |
 | `GET` | `/dashboard` | — (public) | Usage dashboard: total runs, success rate, avg latency, a table of every run |
-| `GET` | `/chat-test` | — (public) | A live chat UI for manually testing `/chat` (below) |
+| `GET` | `/chat-test` | — (public) | A live chat UI for manually testing `/api/v1/chat` (below) |
 
-**`POST /chat`** — header `X-API-Key: <API_KEY>` required.
+**`POST /api/v1/chat`** — header `X-API-Key: <API_KEY>` required.
 
 ```json
 // Request
@@ -277,7 +280,7 @@ event: done
 data: {"session_id": "any-string-you-pick"}
 ```
 
-**`GET /chat/{session_id}`** — header `X-API-Key: <API_KEY>` required.
+**`GET /api/v1/chat/{session_id}`** — header `X-API-Key: <API_KEY>` required.
 
 ```json
 [
@@ -296,7 +299,7 @@ bridge note, never appear here since a customer never saw either one either.
 
 `GET /dashboard` — a single self-contained HTML page (`api/static/dashboard.html`,
 vanilla JS, no build step, no new dependency), reading every logged run from
-`GET /runs`. Every `/chat` call appends one record to `db/runs.jsonl`
+`GET /api/v1/runs`. Every `/api/v1/chat` call appends one record to `db/runs.jsonl`
 (`agents/runner.py`'s `_log_run()`, best-effort — a logging failure never
 breaks the actual chat response):
 
@@ -326,8 +329,8 @@ renders until a valid key is submitted, same gate as calling `/runs` directly.
 ## Live chat test page
 
 `GET /chat-test` (`api/static/chat_test.html`) — a self-contained HTML page
-for manually exercising `/chat` from a browser, no backend framework needed
-to view it: open it either via the running server (`http://localhost:8000/chat-test`)
+for manually exercising `/api/v1/chat` from a browser, no backend framework
+needed to view it: open it either via the running server (`http://localhost:8000/chat-test`)
 or directly as a local file (`file:///...` — the API has CORS enabled
 specifically so this works cross-origin from a `file://` page, confirmed
 necessary: without it the browser blocks the fetch before the request even
@@ -538,7 +541,7 @@ python -m eval.run_full_eval
 ### Testing the API directly
 
 ```bash
-curl -N -X POST http://127.0.0.1:8000/chat \
+curl -N -X POST http://127.0.0.1:8000/api/v1/chat \
   -H "Content-Type: application/json" \
   -H "X-API-Key: <your API_KEY>" \
   -d '{"message": "Health Plus มีแผนอะไรบ้าง", "session_id": "test-1"}'

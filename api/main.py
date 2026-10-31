@@ -1,6 +1,9 @@
-"""FastAPI app — /chat and /runs behind X-API-Key auth, /dashboard and
-/chat-test public (static pages with no data baked in; they ask for the key
-client-side and send it as X-API-Key on their own fetches). CORS is open
+"""FastAPI app — /api/v1/chat and /api/v1/runs behind X-API-Key auth (prefixed
+to match the reference API's own convention); /dashboard and /chat-test stay
+unprefixed, same split as that reference (GET /dashboard, GET /health were
+never under /api/v1 either) — they're pages, not API endpoints, and are
+public (static pages with no data baked in; they ask for the key client-side
+and send it as X-API-Key on their own fetches). CORS is open
 (allow_origins=["*"]) specifically so api/static/chat_test.html works when
 opened directly via file:// — confirmed necessary the hard way: without it,
 the browser blocks the fetch with "No 'Access-Control-Allow-Origin' header"
@@ -28,8 +31,8 @@ app = FastAPI(title="InsureX Sales Agent")
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
-app.include_router(chat_router)
-app.include_router(runs_router)
+app.include_router(chat_router, prefix="/api/v1")
+app.include_router(runs_router, prefix="/api/v1")
 
 
 @app.get("/dashboard")

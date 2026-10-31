@@ -81,7 +81,7 @@
       <button id="sendBtn">ส่ง</button>
     </div>
   </div>
-  <p class="footer-note">เชื่อม <code>POST /chat</code> จริงผ่าน fetch + ReadableStream (ไม่ใช้ EventSource เพราะต้องส่ง header/POST body) — token มาแบบ stream จริง ไม่ได้ buffer รอจบก่อนแสดง</p>
+  <p class="footer-note">เชื่อม <code>POST /api/v1/chat</code> จริงผ่าน fetch + ReadableStream (ไม่ใช้ EventSource เพราะต้องส่ง header/POST body) — token มาแบบ stream จริง ไม่ได้ buffer รอจบก่อนแสดง</p>
 
 <script>
 const messagesEl = document.getElementById('messages');
@@ -143,7 +143,7 @@ async function sendMessage() {
   let aiBubble = null;
 
   try {
-    const resp = await fetch(`${baseUrl}/chat`, {
+    const resp = await fetch(`${baseUrl}/api/v1/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
       body: JSON.stringify({ message: text, session_id: sessionId }),

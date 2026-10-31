@@ -61,7 +61,7 @@ async function load() {
   status.textContent = '';
   let resp;
   try {
-    resp = await fetch('/runs', { headers: { 'X-API-Key': key } });
+    resp = await fetch('/api/v1/runs', { headers: { 'X-API-Key': key } });
   } catch (e) {
     status.textContent = 'Request failed: ' + e;
     return;

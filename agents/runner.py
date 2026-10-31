@@ -58,6 +58,35 @@ async def astream_turn(session_id: str, user_message: str):
             yield namespace, mode, chunk
 
 
+async def stream_structured_events(session_id: str, user_message: str):
+    """{"type": "token", "content": ...} / {"type": "status", "tool": ...} — the
+    filtered, UI-agnostic event stream both stream_events() (SSE, below) and
+    streamlit_app.py build on, so the namespace/mode filtering logic exists in
+    exactly one place.
+
+    namespace == () restricts streamed tokens to supervisor's own LLM call —
+    without it, rag_subgraph's internal calls leak through too: confirmed
+    empirically (this module's own smoke test) that grade_documents' structured-
+    output call streams its raw JSON ({"binary_score":"yes"}) as if it were reply
+    text, right before the real answer. supervisor is the only node that ever
+    composes a user-facing reply (§2) — nothing from inside the subgraph should
+    ever reach the client as a token."""
+    async for namespace, mode, chunk in astream_turn(session_id, user_message):
+        if mode == "messages" and namespace == ():
+            token_chunk, _metadata = chunk
+            # §8: "messages" mode also passes complete ToolMessages through as they're
+            # added to state — only AIMessageChunk is real streamed reply text.
+            if isinstance(token_chunk, AIMessageChunk) and token_chunk.content:
+                yield {"type": "token", "content": token_chunk.content}
+        elif mode == "updates" and namespace == ():
+            for node_name, node_output in chunk.items():
+                if node_name != "supervisor" or not node_output:
+                    continue
+                last = (node_output.get("messages") or [None])[-1]
+                for tc in getattr(last, "tool_calls", None) or []:
+                    yield {"type": "status", "tool": tc["name"]}
+
+
 def _sse(data: dict, event: str | None = None) -> str:
     frame = f"event: {event}\n" if event else ""
     return frame + f"data: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
@@ -74,28 +103,13 @@ async def stream_events(session_id: str, user_message: str):
     tools_used: list[str] = []
     error: str | None = None
     try:
-        async for namespace, mode, chunk in astream_turn(session_id, user_message):
-            if mode == "messages" and namespace == ():
-                # namespace == () restricts streamed tokens to supervisor's own LLM call — without
-                # it, rag_subgraph's internal calls leak through too: confirmed empirically (this
-                # module's own smoke test) that grade_documents' structured-output call streams its
-                # raw JSON ({"binary_score":"yes"}) as if it were reply text, right before the real
-                # answer. supervisor is the only node that ever composes a user-facing reply (§2) —
-                # nothing from inside the subgraph should ever reach the client as a token.
-                token_chunk, _metadata = chunk
-                # §8: "messages" mode also passes complete ToolMessages through as they're
-                # added to state — only AIMessageChunk is real streamed reply text.
-                if isinstance(token_chunk, AIMessageChunk) and token_chunk.content:
-                    reply_parts.append(token_chunk.content)
-                    yield _sse({"type": "token", "content": token_chunk.content})
-            elif mode == "updates" and namespace == ():
-                for node_name, node_output in chunk.items():
-                    if node_name != "supervisor" or not node_output:
-                        continue
-                    last = (node_output.get("messages") or [None])[-1]
-                    for tc in getattr(last, "tool_calls", None) or []:
-                        tools_used.append(tc["name"])
-                        yield _sse({"stage": "working", "tool": tc["name"]}, event="status")
+        async for event in stream_structured_events(session_id, user_message):
+            if event["type"] == "token":
+                reply_parts.append(event["content"])
+                yield _sse({"type": "token", "content": event["content"]})
+            elif event["type"] == "status":
+                tools_used.append(event["tool"])
+                yield _sse({"stage": "working", "tool": event["tool"]}, event="status")
     except Exception as e:
         error = str(e)
         raise

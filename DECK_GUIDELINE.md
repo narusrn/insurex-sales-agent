@@ -32,7 +32,20 @@ written later, update these citations to point at it.
    never save incomplete or unconfirmed personal data, and never leak one
    customer's conversation into another's.
 
-3. **Architecture overview** — `assets/graph.png`. Walk the happy path left
+3. **System design template (reference only)** — `assets/example system
+   design'.jpg` (a generic "System Design Master Template" from
+   DesignGurus.io: DNS/load balancer/API gateway/caching/queues/workers —
+   none of it specific to this project). State this plainly on the slide,
+   don't let it pass as InsureX's own diagram: it's the framework used to
+   *think through* what this system needed before narrowing down to the
+   actual, much smaller shape — a single FastAPI process, one LangGraph
+   agent, SQLite, no queues, no separate workers, no CDN, because none of
+   that scale is called for here. The real answer to "what's the system
+   design" is the very next slide, `assets/graph.png` — this one's only job
+   is showing the starting checklist got actively narrowed down, not
+   applied wholesale.
+
+4. **Architecture overview** — `assets/graph.png`. Walk the happy path left
    to right: Supervisor → (RAG subgraph, when product info is needed) →
    `extract_lead_info` → `save_lead`, every tool routing back to Supervisor
    via `Command(goto=...)`, never a static edge (`README.md` "Command-routing
@@ -44,7 +57,7 @@ written later, update these citations to point at it.
    path — QA answers, lead acknowledgements, and plain conversation all go
    through it (`README.md` "Architecture overview").
 
-4. **Safety boundary #1 — no hallucinated certainty** (`README.md` "No
+5. **Safety boundary #1 — no hallucinated certainty** (`README.md` "No
    hallucinated certainty"). The concept slide: `grade_documents`' relevance
    verdict is threaded back to Supervisor specifically so it can tell "here's
    what I found" apart from "retries ran out and this still wasn't relevant."
@@ -58,7 +71,7 @@ written later, update these citations to point at it.
    two-rewrite retry loop ending in an honest fallback, not a guess — lives
    on the eval slide (6), not duplicated here.
 
-5. **Safety boundary #2 — won't save data it hasn't confirmed**
+6. **Safety boundary #2 — won't save data it hasn't confirmed**
    (`README.md` "Lead collection"). `save_lead` has two separate,
    deterministic gates, not one: **completeness** (all 4 required fields
    present and non-blank, or it returns `"Missing: X"`) and **confirmation**
@@ -74,7 +87,7 @@ written later, update these citations to point at it.
    zero code-level fallback left to catch a misread, so a pass here is a real
    result, not a formality.
 
-6. **Eval harness — real numbers, not cherry-picked.** `eval/golden_dataset.json`
+7. **Eval harness — real numbers, not cherry-picked.** `eval/golden_dataset.json`
    (13 `qa_cases` across easy/hard/out_of_scope/multi_hop + 6 `lead_cases` +
    2 `session_cases`) run via `python -m eval.run_full_eval`, full transcripts
    + pass/fail in `eval/demo_log.txt`. Report the real last-run numbers:
@@ -83,7 +96,7 @@ written later, update these citations to point at it.
      `qa_cases` **8/13 (61.5%)** on strict keypoint substring-match — worth
      stating plainly, not left implicit: **4 of the 5 `qa` failures
      (`qa-06`, `qa-09`, `qa-11`, `qa-12`) are the honest-fallback behavior
-     from slide 4 firing correctly**, not wrong answers — the agent ran its
+     from slide 5 firing correctly**, not wrong answers — the agent ran its
      full retry budget and said "I don't know, contact an agent" instead of
      guessing. The 5th (`qa-02`) actually retrieved the right premium figure
      (6,800 บาท, matching the expected keypoint) but missed a secondary
@@ -94,7 +107,7 @@ written later, update these citations to point at it.
      above, and the number that actually isolates retrieval quality from
      generation quality.
 
-7. **The agentic RAG retriever** — `assets/graph-retriever.png` (the same
+8. **The agentic RAG retriever** — `assets/graph-retriever.png` (the same
    nested subgraph visible inside `graph.png`'s xray view, isolated on its
    own for this slide). Not a single fire-and-forget similarity search:
    retrieve → `grade_documents` (an LLM judges relevance against the
@@ -105,7 +118,7 @@ written later, update these citations to point at it.
    guess" proof — both show the full two-rewrite loop verbatim, straight
    from `eval/demo_log.txt`, not a cleaned-up paraphrase.
 
-8. **A real conversation, start to finish** — `assets/lead-collection-conversation.png`,
+9. **A real conversation, start to finish** — `assets/lead-collection-conversation.png`,
    a live-captured run (session `fda66787-98d8-4e79-95aa-c110f82e94f6`, not
    staged — reproduce fresh via `GET /api/v1/chat/fda66787-...` or by replaying
    the same 6 messages through `/api/v1/chat-test` if `db/checkpoints.sqlite`
@@ -139,7 +152,7 @@ written later, update these citations to point at it.
    incrementally — product first, then name/occupation/income, phone still
    missing), `save_lead` was only ever called *after* `extract_lead_info`
    reported complete data, and it refused to persist on the first complete
-   call — exactly the two gates from slide 5, visibly firing in a real run,
+   call — exactly the two gates from slide 6, visibly firing in a real run,
    not asserted in the abstract. Pair with `session-01`/`session-02`'s
    transcript (`README.md` "Demo transcripts") if there's room: a second
    session has zero knowledge of the first's name (`sess-B` can't answer
@@ -147,10 +160,10 @@ written later, update these citations to point at it.
    plan" refers to Health Plus from two turns earlier — both verified
    directly against `checkpoints.sqlite`, not just the reply text.
 
-9. **It runs, with real usage data** — `assets/dashboard-screenshot.png` +
+10. **It runs, with real usage data** — `assets/dashboard-screenshot.png` +
    `assets/dashboard-expanded.png` (click-to-expand trace + per-node token
    breakdown). Every `/api/v1/chat` turn appends one record to
-   `db/runs.jsonl` — this is the final turn of the same session as slide 8's
+   `db/runs.jsonl` — this is the final turn of the same session as slide 9's
    transcript (`db/runs.jsonl`, trimmed to the fields worth putting on a
    slide):
    ```json
@@ -171,11 +184,11 @@ written later, update these citations to point at it.
    call inside the RAG subgraph when it runs — priced against a small
    hand-maintained rate table, explicitly labeled approximate rather than
    presented as exact (`README.md` "Usage dashboard"). The full `trace` array
-   (what slide 8's transcript is built from) and `usage.by_node` breakdown
+   (what slide 9's transcript is built from) and `usage.by_node` breakdown
    are both in the same record, one click away in the dashboard's expanded
    row view — that's what `dashboard-expanded.png` is a screenshot of.
 
-10. **Two ways to drive it** — `assets/chat-test-screenshot.png`
+11. **Two ways to drive it** — `assets/chat-test-screenshot.png`
     (`/api/v1/chat-test`, a self-contained HTML page with real token-by-token
     SSE streaming, no backend framework needed to open it) and
     `/api/v1/docs` (Swagger, standardized to match
@@ -185,9 +198,9 @@ written later, update these citations to point at it.
     `{"error": {"code","message"}}` responses on every failure, `GET
     /health`). Worth a one-line mention: an earlier Streamlit app was built,
     then deliberately removed in favor of this simpler static page — see
-    slide 12's scope note.
+    slide 13's scope note.
 
-11. **What I'd change for production** — not pulled from a `WRITEUP.md`
+12. **What I'd change for production** — not pulled from a `WRITEUP.md`
     (none exists yet), stated plainly here instead:
     - Real per-token pricing (an API lookup or a maintained table with a
       freshness check), not the hand-maintained static rates
@@ -204,7 +217,7 @@ written later, update these citations to point at it.
       (e.g. LangSmith) instead of an in-house JSON-lines file, once volume
       justifies it.
 
-12. **Close** — repo link, one line on scope: what the brief asked for vs.
+13. **Close** — repo link, one line on scope: what the brief asked for vs.
     what was built on request beyond it — the usage dashboard, the live chat
     test page (replacing an earlier Streamlit app, removed on request), the
     per-turn cost/trace logging, and standardizing the API layer
@@ -226,7 +239,7 @@ written later, update these citations to point at it.
   `agent-architecture-patterns.md`, or this file itself — all four are
   working documents, not deck content (same exception the reference repo's
   own guideline makes for its `PLAN.md`).
-- Slide 8's transcripts are real, captured examples — don't invent a
+- Slide 9's transcripts are real, captured examples — don't invent a
   cleaner-looking one. If they've gone stale by presentation time, re-run the
   same conversation and recapture it rather than hand-writing dialogue that
   looks plausible.
@@ -235,11 +248,12 @@ written later, update these citations to point at it.
 
 | File | Use for |
 |---|---|
-| `assets/graph.png` | Slide 3 (architecture) |
-| `assets/graph-retriever.png` | Slide 7 (agentic RAG) |
-| `assets/lead-collection-conversation.png` | Slide 8 (a real conversation) |
-| `assets/dashboard-screenshot.png`, `assets/dashboard-expanded.png` | Slide 9 (it runs) |
-| `assets/chat-test-screenshot.png` | Slide 10 (two ways to drive it) |
+| `assets/example system design'.jpg` | Slide 3 (system design template, reference only — not InsureX's own diagram) |
+| `assets/graph.png` | Slide 4 (architecture) |
+| `assets/graph-retriever.png` | Slide 8 (agentic RAG) |
+| `assets/lead-collection-conversation.png` | Slide 9 (a real conversation) |
+| `assets/dashboard-screenshot.png`, `assets/dashboard-expanded.png` | Slide 10 (it runs) |
+| `assets/chat-test-screenshot.png` | Slide 11 (two ways to drive it) |
 | `agents/visualize.py` (`python -m agents.visualize`) | Re-run if the graph structure changes before presenting — regenerates both `graph.png` and `graph-retriever.png` from the real compiled graphs, keeping the diagrams honest instead of stale |
 
 ## If building this as a Claude Artifact/Design deck

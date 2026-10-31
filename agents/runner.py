@@ -2,6 +2,14 @@
 endpoint. orchestrator.py only DEFINES the graph; this module is what actually
 runs it, same split as the reference repo it's checked against. See
 implementation-plan.md §1.1.
+
+Every function here takes an already-compiled `graph` instead of opening its own
+checkpointer connection — api/main.py's lifespan opens ONE AsyncSqliteSaver
+connection for the app's whole lifetime and compiles the graph once against it,
+stored on app.state.graph, matching the reference API's own lifespan pattern.
+Opening a fresh sqlite connection (plus checkpointer.setup()) per request was
+real, avoidable overhead, and inconsistent besides — astream_turn() used to call
+setup() every turn while get_history()/_get_trace() never did.
 """
 import json
 import os
@@ -10,9 +18,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-
-from .orchestrator import CHECKPOINT_DB_PATH, build_graph
 
 RUNS_LOG_PATH = Path(__file__).resolve().parent.parent / "db" / "runs.jsonl"
 
@@ -72,16 +77,14 @@ def _log_run(
         pass
 
 
-async def _get_trace(session_id: str) -> list[str]:
+async def _get_trace(graph, session_id: str) -> list[str]:
     """Final render_dialogue()-ready trace for a session, straight from the checkpointer —
     same read pattern as get_history(), just a different state field."""
-    async with AsyncSqliteSaver.from_conn_string(str(CHECKPOINT_DB_PATH)) as checkpointer:
-        graph = build_graph().compile(checkpointer=checkpointer)
-        snapshot = await graph.aget_state({"configurable": {"thread_id": session_id}})
-        return (snapshot.values or {}).get("trace", [])
+    snapshot = await graph.aget_state({"configurable": {"thread_id": session_id}})
+    return (snapshot.values or {}).get("trace", [])
 
 
-async def get_history(session_id: str) -> list[dict]:
+async def get_history(graph, session_id: str) -> list[dict]:
     """User-facing chat history for a session — [{"role": "user"/"assistant", "content": ...}],
     chronological. Reads straight from the checkpointer, no separate storage. Filters to
     HumanMessage and supervisor's own AIMessages only: a tool-call-only AIMessage has no content
@@ -89,41 +92,35 @@ async def get_history(session_id: str) -> list[dict]:
     excluded by its `name` tag (orchestrator.py) — neither is something a customer ever saw,
     so neither belongs in a chat-history view. An unused session_id returns [] (confirmed
     directly: aget_state on a fresh thread_id returns an empty StateSnapshot, not an error)."""
-    async with AsyncSqliteSaver.from_conn_string(str(CHECKPOINT_DB_PATH)) as checkpointer:
-        graph = build_graph().compile(checkpointer=checkpointer)
-        snapshot = await graph.aget_state({"configurable": {"thread_id": session_id}})
-        messages = (snapshot.values or {}).get("messages", [])
-        history = []
-        for m in messages:
-            if isinstance(m, HumanMessage) and m.content:
-                history.append({"role": "user", "content": m.content})
-            elif isinstance(m, AIMessage) and m.content and m.name != "after_retrieve_bridge":
-                history.append({"role": "assistant", "content": m.content})
-        return history
+    snapshot = await graph.aget_state({"configurable": {"thread_id": session_id}})
+    messages = (snapshot.values or {}).get("messages", [])
+    history = []
+    for m in messages:
+        if isinstance(m, HumanMessage) and m.content:
+            history.append({"role": "user", "content": m.content})
+        elif isinstance(m, AIMessage) and m.content and m.name != "after_retrieve_bridge":
+            history.append({"role": "assistant", "content": m.content})
+    return history
 
 
-async def astream_turn(session_id: str, user_message: str):
-    """Raw (namespace, mode, chunk) tuples for one turn — opens its own checkpointer
-    connection scoped to this call only (simpler than a long-lived global singleton,
-    no explicit close bookkeeping)."""
-    async with AsyncSqliteSaver.from_conn_string(str(CHECKPOINT_DB_PATH)) as checkpointer:
-        await checkpointer.setup()
-        graph = build_graph().compile(checkpointer=checkpointer)
-        config = {"configurable": {"thread_id": session_id}}
-        state = {
-            "session_id": session_id,  # save_lead reads state["session_id"] directly (not .get) —
-            # omitting it here would KeyError the first time a fresh thread reaches save_lead
-            "messages": [HumanMessage(content=user_message)],
-            "query": None, "snippets": None, "step": 0,
-            "conversation_summary": None, "trace": [], "last_retrieval_relevant": None,
-        }
-        async for namespace, mode, chunk in graph.astream(
-            state, config, stream_mode=["messages", "updates"], subgraphs=True,  # §8 — not optional
-        ):
-            yield namespace, mode, chunk
+async def astream_turn(graph, session_id: str, user_message: str):
+    """Raw (namespace, mode, chunk) tuples for one turn, against the shared compiled
+    graph (api/main.py's lifespan owns its checkpointer's connection/setup)."""
+    config = {"configurable": {"thread_id": session_id}}
+    state = {
+        "session_id": session_id,  # save_lead reads state["session_id"] directly (not .get) —
+        # omitting it here would KeyError the first time a fresh thread reaches save_lead
+        "messages": [HumanMessage(content=user_message)],
+        "query": None, "snippets": None, "step": 0,
+        "conversation_summary": None, "trace": [], "last_retrieval_relevant": None,
+    }
+    async for namespace, mode, chunk in graph.astream(
+        state, config, stream_mode=["messages", "updates"], subgraphs=True,  # §8 — not optional
+    ):
+        yield namespace, mode, chunk
 
 
-async def stream_structured_events(session_id: str, user_message: str):
+async def stream_structured_events(graph, session_id: str, user_message: str):
     """{"type": "token", "content": ...} / {"type": "status", "tool": ...} — the
     filtered, UI-agnostic event stream both stream_events() (SSE, below) and the
     live chat test page (api/static/chat_test.html, via /chat) build on, so the
@@ -142,7 +139,7 @@ async def stream_structured_events(session_id: str, user_message: str):
     directly against the installed LangGraph version rather than assumed to
     exist. supervisor is the only node that should ever reach the client as a
     token (§2) — gated on node identity now, not just nesting depth."""
-    async for namespace, mode, chunk in astream_turn(session_id, user_message):
+    async for namespace, mode, chunk in astream_turn(graph, session_id, user_message):
         if mode == "messages":
             token_chunk, metadata = chunk
             # usage_metadata: NOT scoped to namespace == ()/supervisor like the token check below
@@ -180,7 +177,7 @@ def _sse(data: dict, event: str | None = None) -> str:
     return frame + f"data: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
 
 
-async def stream_events(session_id: str, user_message: str):
+async def stream_events(graph, session_id: str, user_message: str):
     """Ready-to-send SSE frames for one turn. Ends with event: done regardless of how
     the stream ended (finally: block). Also logs one run record (db/runs.jsonl) for
     the /runs + /dashboard endpoints: token usage per LLM call, an approximate cost
@@ -192,7 +189,7 @@ async def stream_events(session_id: str, user_message: str):
     usage_by_node: list[dict] = []
     error: str | None = None
     try:
-        async for event in stream_structured_events(session_id, user_message):
+        async for event in stream_structured_events(graph, session_id, user_message):
             if event["type"] == "token":
                 reply_parts.append(event["content"])
                 yield _sse({"type": "token", "content": event["content"]})
@@ -206,7 +203,7 @@ async def stream_events(session_id: str, user_message: str):
         error = str(e)
         raise
     finally:
-        trace = await _get_trace(session_id) if error is None else []
+        trace = await _get_trace(graph, session_id) if error is None else []
         _log_run(
             session_id, user_message, "".join(reply_parts), tools_used,
             time.monotonic() - start, error, usage_by_node, trace,
@@ -223,14 +220,22 @@ if __name__ == "__main__":
     from dotenv import load_dotenv
     load_dotenv()
 
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+    from .orchestrator import CHECKPOINT_DB_PATH, build_graph
+
     async def _run():
-        frame_times = []
-        async for frame in stream_events("runner-smoke-test", "Health Plus มีแผนอะไรบ้าง"):
-            frame_times.append(time.monotonic())
-            print(frame.strip())
-        assert len(frame_times) > 2, "expected multiple frames, not one bulk response"
-        gaps = [b - a for a, b in zip(frame_times, frame_times[1:])]
-        assert any(g > 0.01 for g in gaps), "frames arrived all at once — not real streaming"
-        print(f"\nrunner.py smoke test OK: {len(frame_times)} frames, incremental arrival confirmed")
+        async with AsyncSqliteSaver.from_conn_string(str(CHECKPOINT_DB_PATH)) as checkpointer:
+            await checkpointer.setup()
+            graph = build_graph().compile(checkpointer=checkpointer)
+
+            frame_times = []
+            async for frame in stream_events(graph, "runner-smoke-test", "Health Plus มีแผนอะไรบ้าง"):
+                frame_times.append(time.monotonic())
+                print(frame.strip())
+            assert len(frame_times) > 2, "expected multiple frames, not one bulk response"
+            gaps = [b - a for a, b in zip(frame_times, frame_times[1:])]
+            assert any(g > 0.01 for g in gaps), "frames arrived all at once — not real streaming"
+            print(f"\nrunner.py smoke test OK: {len(frame_times)} frames, incremental arrival confirmed")
 
     asyncio.run(_run())

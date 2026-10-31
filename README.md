@@ -28,7 +28,7 @@ agents/
 ├── memory.py                        # sanitize_dangling_tool_calls() + trim/summarize context management
 ├── trace.py                           # render_dialogue() — human-readable replay log
 ├── logging_conf.py                      # Structured JSON stdout logging
-├── visualize.py                           # get_graph(xray=True).draw_mermaid_png() — regenerate graph.png
+├── visualize.py                           # get_graph(xray=True).draw_mermaid_png() — regenerate assets/graph.png
 ├── prompts/
 │   ├── _supervisor.md                       # The one prompt: tool-use rules, confirmation gate, honesty rule
 │   ├── _extract_lead.md                       # extract_lead_info's own prompt
@@ -36,9 +36,10 @@ agents/
 └── subgraphs/
     └── rag.py                                     # Agentic RAG: generate_query_or_respond, retrieve, grade, rewrite
 api/
-├── main.py                 # FastAPI app, one router
-├── routes/chat.py            # POST /api/v1/chat — thin, hands off to agents.runner.stream_events
-└── schemas/chat.py             # SessionChatRequest{message, session_id}
+├── main.py                 # FastAPI app, lifespan (one shared checkpointer), error handlers
+├── auth.py                   # require_api_key — X-API-Key via fastapi.security.APIKeyHeader
+├── routes/                     # chat.py, runs.py — thin, hand off to agents.runner
+└── schemas/                      # chat.py, runs.py, error.py — request/response/error models
 eval/
 ├── golden_dataset.json     # 13 qa_cases + 6 lead_cases + 2 session_cases
 ├── metrics.py                 # Hit Rate@k, MRR — standard IR metrics, no new dependency
@@ -47,7 +48,7 @@ eval/
 Data/pdfs/                 # 5 synthetic Thai knowledge-base PDFs (self-authored, InsureX didn't provide real ones)
 db/                        # gitignored: leads.sqlite, checkpoints.sqlite (created on first run)
 tests/test_graph_smoke.py  # One assert-based smoke test
-graph.png                  # Native LangGraph render of the real graph structure
+assets/                    # Screenshots + the graph render, used by this README
 ```
 
 ## Architecture overview
@@ -70,7 +71,7 @@ go through it.
 
 ### The real graph
 
-![Graph structure](graph.png)
+![Graph structure](assets/graph.png)
 
 Generated directly from the compiled graph — `python -m agents.visualize`
 (`get_graph(xray=True).draw_mermaid_png()`). Regenerate after any node/edge
@@ -244,22 +245,31 @@ genuinely saves the in-flight LLM cost, not just in theory.
 
 ## API reference
 
-Full interactive docs at `/docs` (Swagger) once running. API endpoints live
-under `/api/v1` (matching the reference API's own convention); the two static
-pages (`/dashboard`, `/chat-test`) don't, since they're pages, not API calls.
-`/api/v1/chat` and `/api/v1/runs` require an `X-API-Key` header (checked
-against the `API_KEY` env var); `/dashboard` itself is public — it's a static
-page with no data baked in, it asks for the key client-side (kept in
-`sessionStorage` for the tab) and sends it as `X-API-Key` on its own
-`/api/v1/runs` fetch.
+Full interactive docs at `/api/v1/docs` (Swagger) once running — docs and every
+real route live under `/api/v1`, including the two static pages, matching the
+reference API's own convention. Only `GET /health` stays outside the version
+prefix, same exception the reference makes: infra/monitoring checks shouldn't
+need to track an API version. `/api/v1/chat` and `/api/v1/runs` require an
+`X-API-Key` header (checked against the `API_KEY` env var, enforced once at
+the router level, not per-route); `/api/v1/dashboard` and `/api/v1/chat-test`
+stay public — they're static pages with no data baked in, a plain browser
+navigation can't attach a custom header, so each asks for the key client-side
+(kept in `sessionStorage` for the tab) and sends it as `X-API-Key` on its own
+`/api/v1/runs` / `/api/v1/chat` fetches.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
+| `GET` | `/health` | — (public) | Liveness check: graph compiled, API keys configured |
 | `POST` | `/api/v1/chat` | `X-API-Key` | The chat endpoint (below) |
 | `GET` | `/api/v1/chat/{session_id}` | `X-API-Key` | That session's chat history, `[{"role": "user"/"assistant", "content": ...}, ...]` — reads straight from the checkpointer, `[]` for an unused `session_id` |
-| `GET` | `/api/v1/runs` | `X-API-Key` | JSON dump of `db/runs.jsonl` (newest first, capped to 500) — powers `/dashboard` |
-| `GET` | `/dashboard` | — (public) | Usage dashboard: total runs, success rate, avg latency, a table of every run |
-| `GET` | `/chat-test` | — (public) | A live chat UI for manually testing `/api/v1/chat` (below) |
+| `GET` | `/api/v1/runs` | `X-API-Key` | JSON dump of `db/runs.jsonl` (newest first, capped to 500) — powers `/api/v1/dashboard` |
+| `GET` | `/api/v1/dashboard` | — (public) | Usage dashboard: total runs, success rate, avg latency, a table of every run |
+| `GET` | `/api/v1/chat-test` | — (public) | A live chat UI for manually testing `/api/v1/chat` (below) |
+
+Every error response (4xx/5xx) has the same shape: `{"error": {"code": "...",
+"message": "..."}}` — a global exception handler normalizes both `HTTPException`
+and request-validation failures into it, rather than each raise site picking
+its own ad hoc body.
 
 **`POST /api/v1/chat`** — header `X-API-Key: <API_KEY>` required.
 
@@ -297,7 +307,7 @@ bridge note, never appear here since a customer never saw either one either.
 
 ## Usage dashboard
 
-`GET /dashboard` — a single self-contained HTML page (`api/static/dashboard.html`,
+`GET /api/v1/dashboard` — a single self-contained HTML page (`api/static/dashboard.html`,
 vanilla JS, no build step, no new dependency), reading every logged run from
 `GET /api/v1/runs`. Every `/api/v1/chat` call appends one record to `db/runs.jsonl`
 (`agents/runner.py`'s `_log_run()`, best-effort — a logging failure never
@@ -319,18 +329,18 @@ breaks the actual chat response):
 
 Click a row to expand its trace and per-node usage breakdown. Enter your
 `API_KEY` in the field at the top of the page to load the data — nothing
-renders until a valid key is submitted, same gate as calling `/runs` directly.
+renders until a valid key is submitted, same gate as calling `/api/v1/runs` directly.
 
-![Usage dashboard](Data/dashboard-screenshot.png)
-![Usage dashboard, expanded trace view](Data/dashboard-expanded.png)
+![Usage dashboard](assets/dashboard-screenshot.png)
+![Usage dashboard, expanded trace view](assets/dashboard-expanded.png)
 
 ---
 
 ## Live chat test page
 
-`GET /chat-test` (`api/static/chat_test.html`) — a self-contained HTML page
+`GET /api/v1/chat-test` (`api/static/chat_test.html`) — a self-contained HTML page
 for manually exercising `/api/v1/chat` from a browser, no backend framework
-needed to view it: open it either via the running server (`http://localhost:8000/chat-test`)
+needed to view it: open it either via the running server (`http://localhost:8000/api/v1/chat-test`)
 or directly as a local file (`file:///...` — the API has CORS enabled
 specifically so this works cross-origin from a `file://` page, confirmed
 necessary: without it the browser blocks the fetch before the request even
@@ -343,7 +353,7 @@ isn't possible with `EventSource`), with a live status line while a tool is
 running. `session_id` is generated client-side (`crypto.randomUUID()`); "เริ่ม
 บทสนทนาใหม่" starts a fresh one.
 
-![Live chat test](Data/chat-test-screenshot.png)
+![Live chat test](assets/chat-test-screenshot.png)
 
 ---
 
@@ -532,7 +542,7 @@ cp .env.example .env
 
 # 4. Run the API
 uvicorn api.main:app --reload
-# -> http://127.0.0.1:8000/docs
+# -> http://127.0.0.1:8000/api/v1/docs
 
 # 5. Run the full evaluation suite (regenerates eval/demo_log.txt)
 python -m eval.run_full_eval

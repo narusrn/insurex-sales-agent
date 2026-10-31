@@ -4,6 +4,7 @@ runs it, same split as the reference repo it's checked against. See
 implementation-plan.md §1.1.
 """
 import json
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,12 +16,36 @@ from .orchestrator import CHECKPOINT_DB_PATH, build_graph
 
 RUNS_LOG_PATH = Path(__file__).resolve().parent.parent / "db" / "runs.jsonl"
 
+# USD per 1M tokens, (input, output) — hand-maintained, NOT fetched live, so treat
+# estimated_cost_usd as approximate and possibly stale; prices OpenAI published as of
+# this project's build (2026). Unknown models get cost=None rather than a wrong guess.
+_PRICING_PER_1M_TOKENS = {
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4o": (2.50, 10.00),
+    "gpt-4.1": (2.00, 8.00),
+    "gpt-4.1-mini": (0.40, 1.60),
+}
 
-def _log_run(session_id: str, message: str, reply: str, tools_used: list[str], latency: float, error: str | None) -> None:
+
+def _estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> float | None:
+    rates = _PRICING_PER_1M_TOKENS.get(model)
+    if not rates:
+        return None
+    in_rate, out_rate = rates
+    return round(input_tokens / 1_000_000 * in_rate + output_tokens / 1_000_000 * out_rate, 6)
+
+
+def _log_run(
+    session_id: str, message: str, reply: str, tools_used: list[str], latency: float,
+    error: str | None, usage_by_node: list[dict], trace: list[str],
+) -> None:
     """One JSON line per turn — powers the /runs endpoint + dashboard. Best-effort:
     a logging failure must never break the actual chat response."""
     try:
         RUNS_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        input_tokens = sum(u["input_tokens"] for u in usage_by_node)
+        output_tokens = sum(u["output_tokens"] for u in usage_by_node)
+        model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
         record = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "session_id": session_id,
@@ -30,11 +55,30 @@ def _log_run(session_id: str, message: str, reply: str, tools_used: list[str], l
             "latency": round(latency, 2),
             "success": error is None,
             "error": error,
+            "llm_calls": len(usage_by_node),
+            "usage": {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": input_tokens + output_tokens,
+                "by_node": usage_by_node,
+            },
+            "estimated_cost_usd": _estimate_cost_usd(model, input_tokens, output_tokens),
+            "cost_note": f"approximate — hardcoded {model} per-token rates, may not reflect current pricing",
+            "trace": trace,
         }
         with RUNS_LOG_PATH.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception:
         pass
+
+
+async def _get_trace(session_id: str) -> list[str]:
+    """Final render_dialogue()-ready trace for a session, straight from the checkpointer —
+    same read pattern as get_history(), just a different state field."""
+    async with AsyncSqliteSaver.from_conn_string(str(CHECKPOINT_DB_PATH)) as checkpointer:
+        graph = build_graph().compile(checkpointer=checkpointer)
+        snapshot = await graph.aget_state({"configurable": {"thread_id": session_id}})
+        return (snapshot.values or {}).get("trace", [])
 
 
 async def get_history(session_id: str) -> list[dict]:
@@ -99,12 +143,25 @@ async def stream_structured_events(session_id: str, user_message: str):
     exist. supervisor is the only node that should ever reach the client as a
     token (§2) — gated on node identity now, not just nesting depth."""
     async for namespace, mode, chunk in astream_turn(session_id, user_message):
-        if mode == "messages" and namespace == ():
+        if mode == "messages":
             token_chunk, metadata = chunk
-            # §8: "messages" mode also passes complete ToolMessages through as they're
-            # added to state — only AIMessageChunk is real streamed reply text.
+            # usage_metadata: NOT scoped to namespace == ()/supervisor like the token check below
+            # — every LLM call anywhere in the turn (supervisor's own, extract_lead_info's
+            # structured-output call, every call inside rag_subgraph) contributes to real cost,
+            # confirmed empirically that usage_metadata appears on all of them once
+            # get_llm()'s stream_usage=True is set, regardless of node or nesting.
+            if isinstance(token_chunk, AIMessageChunk) and token_chunk.usage_metadata:
+                yield {
+                    "type": "usage",
+                    "node": metadata.get("langgraph_node"),
+                    "usage_metadata": dict(token_chunk.usage_metadata),
+                }
+            # §8: "messages" mode also passes complete ToolMessages through as they're added to
+            # state — only AIMessageChunk is real streamed reply text, and ONLY from supervisor's
+            # own top-level call — see this function's own docstring for why both checks matter.
             if (
-                isinstance(token_chunk, AIMessageChunk)
+                namespace == ()
+                and isinstance(token_chunk, AIMessageChunk)
                 and token_chunk.content
                 and metadata.get("langgraph_node") == "supervisor"
             ):
@@ -126,12 +183,13 @@ def _sse(data: dict, event: str | None = None) -> str:
 async def stream_events(session_id: str, user_message: str):
     """Ready-to-send SSE frames for one turn. Ends with event: done regardless of how
     the stream ended (finally: block). Also logs one run record (db/runs.jsonl) for
-    the /runs + /dashboard endpoints — a basic usage-tracking addition, separate from
-    render_dialogue(trace) (§3.8), which is the detailed human-readable log, not a
-    queryable one."""
+    the /runs + /dashboard endpoints: token usage per LLM call, an approximate cost
+    estimate, and the full render_dialogue()-ready trace (§3.8) — the human-readable
+    log now doubles as a queryable one instead of living only in `state["trace"]`."""
     start = time.monotonic()
     reply_parts: list[str] = []
     tools_used: list[str] = []
+    usage_by_node: list[dict] = []
     error: str | None = None
     try:
         async for event in stream_structured_events(session_id, user_message):
@@ -141,11 +199,18 @@ async def stream_events(session_id: str, user_message: str):
             elif event["type"] == "status":
                 tools_used.append(event["tool"])
                 yield _sse({"stage": "working", "tool": event["tool"]}, event="status")
+            elif event["type"] == "usage":
+                usage_by_node.append({"node": event["node"], **event["usage_metadata"]})
+                yield _sse({"node": event["node"], **event["usage_metadata"]}, event="usage")
     except Exception as e:
         error = str(e)
         raise
     finally:
-        _log_run(session_id, user_message, "".join(reply_parts), tools_used, time.monotonic() - start, error)
+        trace = await _get_trace(session_id) if error is None else []
+        _log_run(
+            session_id, user_message, "".join(reply_parts), tools_used,
+            time.monotonic() - start, error, usage_by_node, trace,
+        )
         yield _sse({"session_id": session_id}, event="done")
 
 

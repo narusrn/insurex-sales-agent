@@ -17,9 +17,17 @@
   th, td { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid #eee; vertical-align: top; }
   th { background: #fafafa; position: sticky; top: 0; }
   tr.fail { background: #fff2f2; }
-  .msg { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  tr.run-row { cursor: pointer; }
+  tr.run-row:hover { background: #f7f7fb; }
+  .msg { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .msg:hover { white-space: normal; }
   #status { color: #b00; margin-bottom: 1rem; }
+  .detail-row td { background: #fafafa; padding: .75rem 1rem; }
+  .detail-row.hidden { display: none; }
+  .trace-line { padding: .15rem 0; border-bottom: 1px dashed #e5e5e5; }
+  .by-node { font-size: .78rem; color: #555; margin-top: .5rem; }
+  .cost-note { font-size: .72rem; color: #888; font-style: italic; }
+  .num { text-align: right; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -32,7 +40,11 @@
   <div class="stats" id="stats"></div>
   <table id="runsTable">
     <thead>
-      <tr><th>Time (UTC)</th><th>Session</th><th>Message</th><th>Tools</th><th>Latency (s)</th><th>OK</th></tr>
+      <tr>
+        <th>Time (UTC)</th><th>Session</th><th>Message</th><th>Tools</th>
+        <th class="num">Calls</th><th class="num">Tokens</th><th class="num">Est. cost</th>
+        <th class="num">Latency (s)</th><th>OK</th>
+      </tr>
     </thead>
     <tbody id="runsBody"></tbody>
   </table>
@@ -68,10 +80,14 @@ function renderStats(runs) {
   const okCount = runs.filter(r => r.success).length;
   const avgLatency = n ? (runs.reduce((s, r) => s + (r.latency || 0), 0) / n).toFixed(2) : '0';
   const successRate = n ? Math.round((okCount / n) * 100) : 0;
+  const totalTokens = runs.reduce((s, r) => s + ((r.usage && r.usage.total_tokens) || 0), 0);
+  const totalCost = runs.reduce((s, r) => s + (r.estimated_cost_usd || 0), 0);
   document.getElementById('stats').innerHTML = `
     <div class="stat"><b>${n}</b>total runs</div>
     <div class="stat"><b>${successRate}%</b>success rate</div>
     <div class="stat"><b>${avgLatency}s</b>avg latency</div>
+    <div class="stat"><b>${totalTokens.toLocaleString()}</b>total tokens</div>
+    <div class="stat"><b>$${totalCost.toFixed(4)}</b>est. total cost</div>
   `;
 }
 
@@ -82,16 +98,40 @@ function escapeHtml(s) {
 }
 
 function renderTable(runs) {
-  document.getElementById('runsBody').innerHTML = runs.map(r => `
-    <tr class="${r.success ? '' : 'fail'}">
+  document.getElementById('runsBody').innerHTML = runs.map((r, i) => {
+    const usage = r.usage || {};
+    const cost = r.estimated_cost_usd;
+    const traceHtml = (r.trace || []).map(line => `<div class="trace-line">${escapeHtml(line)}</div>`).join('') || '<em>no trace recorded</em>';
+    const byNodeHtml = (usage.by_node || []).map(u =>
+      `${escapeHtml(u.node)}: ${u.total_tokens} tokens (in ${u.input_tokens} / out ${u.output_tokens})`
+    ).join(' · ');
+    return `
+    <tr class="run-row ${r.success ? '' : 'fail'}" onclick="toggleDetail(${i})">
       <td>${escapeHtml(r.timestamp)}</td>
       <td>${escapeHtml(r.session_id)}</td>
       <td class="msg" title="${escapeHtml(r.message)}">${escapeHtml(r.message)}</td>
       <td>${escapeHtml((r.tools_used || []).join(', '))}</td>
-      <td>${r.latency ?? ''}</td>
+      <td class="num">${r.llm_calls ?? ''}</td>
+      <td class="num">${(usage.total_tokens ?? '').toLocaleString()}</td>
+      <td class="num">${cost != null ? '$' + cost.toFixed(5) : '—'}</td>
+      <td class="num">${r.latency ?? ''}</td>
       <td>${r.success ? '✅' : '❌'}</td>
     </tr>
-  `).join('');
+    <tr class="detail-row hidden" id="detail-${i}">
+      <td colspan="9">
+        ${r.error ? `<div style="color:#b00"><b>Error:</b> ${escapeHtml(r.error)}</div>` : ''}
+        <b>Trace</b>
+        ${traceHtml}
+        <div class="by-node"><b>Usage by node:</b> ${byNodeHtml || '—'}</div>
+        ${r.cost_note ? `<div class="cost-note">${escapeHtml(r.cost_note)}</div>` : ''}
+      </td>
+    </tr>
+  `;
+  }).join('');
+}
+
+function toggleDetail(i) {
+  document.getElementById(`detail-${i}`).classList.toggle('hidden');
 }
 
 if (saved) load();

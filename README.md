@@ -298,14 +298,28 @@ bridge note, never appear here since a customer never saw either one either.
 vanilla JS, no build step, no new dependency), reading every logged run from
 `GET /runs`. Every `/chat` call appends one record to `db/runs.jsonl`
 (`agents/runner.py`'s `_log_run()`, best-effort — a logging failure never
-breaks the actual chat response): timestamp, `session_id`, message, reply,
-tools used, latency, and success/error.
+breaks the actual chat response):
 
-Enter your `API_KEY` in the field at the top of the page to load the data —
-nothing renders until a valid key is submitted, same gate as calling `/runs`
-directly.
+- `message` / `reply`, `tools_used`, `latency`, `success`/`error`
+- `llm_calls` — how many separate LLM invocations that one turn made (e.g. a RAG
+  turn: `generate_query_or_respond` → `grade_documents` → `supervisor` ×2)
+- `usage` — `input_tokens`/`output_tokens`/`total_tokens`, both summed and broken
+  down **per node** (`usage.by_node`), captured via `get_llm()`'s `stream_usage=True`
+  from every LLM call in the turn — including ones inside `rag_subgraph` and inside
+  a tool like `extract_lead_info`, not just supervisor's own call
+- `estimated_cost_usd` — a rough estimate from a small hand-maintained price table
+  (`agents/runner.py`'s `_PRICING_PER_1M_TOKENS`), **not fetched live** — treat it as
+  approximate; `cost_note` on each record says so explicitly, and an unrecognized
+  model gets `null` rather than a wrong guess
+- `trace` — the full `render_dialogue()`-ready step-by-step trace (§3.8) for that
+  turn, read straight from the checkpointer after the turn completes
+
+Click a row to expand its trace and per-node usage breakdown. Enter your
+`API_KEY` in the field at the top of the page to load the data — nothing
+renders until a valid key is submitted, same gate as calling `/runs` directly.
 
 ![Usage dashboard](Data/dashboard-screenshot.png)
+![Usage dashboard, expanded trace view](Data/dashboard-expanded.png)
 
 ---
 

@@ -5,6 +5,12 @@ from langchain_openai import AzureChatOpenAI, ChatOpenAI
 
 
 def get_llm(temperature: float = 0, **kwargs):
+    # stream_usage=True: an OpenAI-compatible streaming call only reports token usage on its
+    # final chunk when asked (stream_options={"include_usage": True} under the hood) — without
+    # it every streamed call (which is every call: LangGraph's "messages" stream_mode surfaces
+    # even plain .invoke() calls as chunks, confirmed empirically elsewhere in this project)
+    # reports zero usage, making cost tracking (agents/runner.py) impossible.
+    kwargs.setdefault("stream_usage", True)
     provider = os.environ.get("LLM_PROVIDER", "openai").lower()
     if provider == "azure":
         return AzureChatOpenAI(

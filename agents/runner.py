@@ -60,23 +60,33 @@ async def astream_turn(session_id: str, user_message: str):
 
 async def stream_structured_events(session_id: str, user_message: str):
     """{"type": "token", "content": ...} / {"type": "status", "tool": ...} — the
-    filtered, UI-agnostic event stream both stream_events() (SSE, below) and
-    streamlit_app.py build on, so the namespace/mode filtering logic exists in
-    exactly one place.
+    filtered, UI-agnostic event stream both stream_events() (SSE, below) and the
+    live chat test page (api/static/chat_test.html, via /chat) build on, so the
+    filtering logic exists in exactly one place.
 
-    namespace == () restricts streamed tokens to supervisor's own LLM call —
-    without it, rag_subgraph's internal calls leak through too: confirmed
-    empirically (this module's own smoke test) that grade_documents' structured-
-    output call streams its raw JSON ({"binary_score":"yes"}) as if it were reply
-    text, right before the real answer. supervisor is the only node that ever
-    composes a user-facing reply (§2) — nothing from inside the subgraph should
-    ever reach the client as a token."""
+    namespace == () alone is NOT enough to isolate supervisor's own reply tokens
+    — confirmed the hard way (live chat_test.html testing): `extract_lead_info`'s
+    own internal `.with_structured_output()` call runs inside the top-level
+    `extract_lead_info` ToolNode, not inside a subgraph, so it ALSO has
+    namespace == (), same as supervisor's own LLM call — the raw JSON it
+    generates streamed straight into the reply text, glued onto the front of
+    supervisor's actual answer with no separator. namespace == () still matters
+    for excluding rag_subgraph's internal calls (e.g. grade_documents, which DOES
+    have a non-empty namespace), but the chunk's own metadata is what actually
+    identifies which node produced it: metadata["langgraph_node"] — checked
+    directly against the installed LangGraph version rather than assumed to
+    exist. supervisor is the only node that should ever reach the client as a
+    token (§2) — gated on node identity now, not just nesting depth."""
     async for namespace, mode, chunk in astream_turn(session_id, user_message):
         if mode == "messages" and namespace == ():
-            token_chunk, _metadata = chunk
+            token_chunk, metadata = chunk
             # §8: "messages" mode also passes complete ToolMessages through as they're
             # added to state — only AIMessageChunk is real streamed reply text.
-            if isinstance(token_chunk, AIMessageChunk) and token_chunk.content:
+            if (
+                isinstance(token_chunk, AIMessageChunk)
+                and token_chunk.content
+                and metadata.get("langgraph_node") == "supervisor"
+            ):
                 yield {"type": "token", "content": token_chunk.content}
         elif mode == "updates" and namespace == ():
             for node_name, node_output in chunk.items():

@@ -11,8 +11,10 @@ nothing to infer that from. Without it, those edges render as disconnected boxes
 from pathlib import Path
 
 from .orchestrator import build_graph
+from .subgraphs.rag import graph as rag_subgraph
 
 PNG_PATH = Path(__file__).resolve().parent.parent / "assets" / "graph.png"
+RETRIEVER_PNG_PATH = Path(__file__).resolve().parent.parent / "assets" / "graph-retriever.png"
 
 
 def print_mermaid() -> None:
@@ -24,5 +26,15 @@ def save_png(path: Path = PNG_PATH) -> None:
     print(f"saved {path}")
 
 
+def save_retriever_png(path: Path = RETRIEVER_PNG_PATH) -> None:
+    """Standalone render of just the RAG subgraph (retrieve -> grade -> rewrite
+    loop) — the same nested box visible inside graph.png's xray view, isolated
+    for a slide that's specifically about the agentic retriever, not the whole
+    agent."""
+    rag_subgraph.get_graph().draw_mermaid_png(output_file_path=str(path))
+    print(f"saved {path}")
+
+
 if __name__ == "__main__":
     save_png()
+    save_retriever_png()

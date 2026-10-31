@@ -1,14 +1,15 @@
 """POST /chat — thin HTTP layer only, no shaping of its own. See
 implementation-plan.md §1.1.
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
 from agents.runner import stream_events
 
+from ..auth import require_api_key
 from ..schemas.chat import SessionChatRequest
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_api_key)])
 
 
 @router.post("/chat")

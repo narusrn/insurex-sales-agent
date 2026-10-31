@@ -3,4 +3,5 @@ __pycache__/
 *.pyc
 db/*.sqlite
 db/*.sqlite-*
+db/*.jsonl
 chroma_db/

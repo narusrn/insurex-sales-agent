@@ -244,9 +244,19 @@ genuinely saves the in-flight LLM cost, not just in theory.
 
 ## API reference
 
-Full interactive docs at `/docs` (Swagger) once running.
+Full interactive docs at `/docs` (Swagger) once running. `/chat` and `/runs`
+require an `X-API-Key` header (checked against the `API_KEY` env var); `/dashboard`
+itself is public — it's a static page with no data baked in, it asks for the
+key client-side (kept in `sessionStorage` for the tab) and sends it as
+`X-API-Key` on its own `/runs` fetch.
 
-**`POST /chat`**
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| `POST` | `/chat` | `X-API-Key` | The chat endpoint (below) |
+| `GET` | `/runs` | `X-API-Key` | JSON dump of `db/runs.jsonl` (newest first, capped to 500) — powers `/dashboard` |
+| `GET` | `/dashboard` | — (public) | Usage dashboard: total runs, success rate, avg latency, a table of every run |
+
+**`POST /chat`** — header `X-API-Key: <API_KEY>` required.
 
 ```json
 // Request
@@ -264,6 +274,21 @@ data: {"type": "token", "content": "สุข"}
 event: done
 data: {"session_id": "any-string-you-pick"}
 ```
+
+---
+
+## Usage dashboard
+
+`GET /dashboard` — a single self-contained HTML page (`api/static/dashboard.html`,
+vanilla JS, no build step, no new dependency), reading every logged run from
+`GET /runs`. Every `/chat` call appends one record to `db/runs.jsonl`
+(`agents/runner.py`'s `_log_run()`, best-effort — a logging failure never
+breaks the actual chat response): timestamp, `session_id`, message, reply,
+tools used, latency, and success/error.
+
+Enter your `API_KEY` in the field at the top of the page to load the data —
+nothing renders until a valid key is submitted, same gate as calling `/runs`
+directly.
 
 ---
 
@@ -448,6 +473,7 @@ pip install -r requirements.txt
 # 3. Configure environment
 cp .env.example .env
 # fill in OPENAI_API_KEY (or the Azure block + LLM_PROVIDER=azure)
+# generate an API_KEY: python -c "import secrets; print(secrets.token_urlsafe(32))"
 
 # 4. Run the API
 uvicorn api.main:app --reload
@@ -462,6 +488,7 @@ python -m eval.run_full_eval
 ```bash
 curl -N -X POST http://127.0.0.1:8000/chat \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: <your API_KEY>" \
   -d '{"message": "Health Plus มีแผนอะไรบ้าง", "session_id": "test-1"}'
 ```
 

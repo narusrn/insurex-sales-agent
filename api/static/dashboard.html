@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>InsureX Sales Agent — Usage Dashboard</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; color: #1a1a2e; }
+  h1 { font-size: 1.3rem; }
+  .bar { display: flex; gap: .5rem; margin-bottom: 1.5rem; }
+  input { flex: 1; padding: .5rem; border: 1px solid #ccc; border-radius: 4px; }
+  button { padding: .5rem 1rem; border: none; border-radius: 4px; background: #4f46e5; color: #fff; cursor: pointer; }
+  button:hover { background: #4338ca; }
+  .stats { display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .stat { background: #f2f0ff; border-radius: 8px; padding: .75rem 1rem; min-width: 110px; }
+  .stat b { display: block; font-size: 1.4rem; }
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  th, td { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid #eee; vertical-align: top; }
+  th { background: #fafafa; position: sticky; top: 0; }
+  tr.fail { background: #fff2f2; }
+  .msg { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .msg:hover { white-space: normal; }
+  #status { color: #b00; margin-bottom: 1rem; }
+</style>
+</head>
+<body>
+  <h1>InsureX Sales Agent — Usage Dashboard</h1>
+  <div class="bar">
+    <input id="apiKey" type="password" placeholder="X-API-Key">
+    <button onclick="load()">Load</button>
+  </div>
+  <div id="status"></div>
+  <div class="stats" id="stats"></div>
+  <table id="runsTable">
+    <thead>
+      <tr><th>Time (UTC)</th><th>Session</th><th>Message</th><th>Tools</th><th>Latency (s)</th><th>OK</th></tr>
+    </thead>
+    <tbody id="runsBody"></tbody>
+  </table>
+
+<script>
+const keyInput = document.getElementById('apiKey');
+const saved = sessionStorage.getItem('apiKey');
+if (saved) keyInput.value = saved;
+
+async function load() {
+  const key = keyInput.value.trim();
+  sessionStorage.setItem('apiKey', key);
+  const status = document.getElementById('status');
+  status.textContent = '';
+  let resp;
+  try {
+    resp = await fetch('/runs', { headers: { 'X-API-Key': key } });
+  } catch (e) {
+    status.textContent = 'Request failed: ' + e;
+    return;
+  }
+  if (!resp.ok) {
+    status.textContent = `Error ${resp.status}: ${resp.status === 401 ? 'invalid API key' : await resp.text()}`;
+    return;
+  }
+  const runs = await resp.json();
+  renderStats(runs);
+  renderTable(runs);
+}
+
+function renderStats(runs) {
+  const n = runs.length;
+  const okCount = runs.filter(r => r.success).length;
+  const avgLatency = n ? (runs.reduce((s, r) => s + (r.latency || 0), 0) / n).toFixed(2) : '0';
+  const successRate = n ? Math.round((okCount / n) * 100) : 0;
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><b>${n}</b>total runs</div>
+    <div class="stat"><b>${successRate}%</b>success rate</div>
+    <div class="stat"><b>${avgLatency}s</b>avg latency</div>
+  `;
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s ?? '';
+  return d.innerHTML;
+}
+
+function renderTable(runs) {
+  document.getElementById('runsBody').innerHTML = runs.map(r => `
+    <tr class="${r.success ? '' : 'fail'}">
+      <td>${escapeHtml(r.timestamp)}</td>
+      <td>${escapeHtml(r.session_id)}</td>
+      <td class="msg" title="${escapeHtml(r.message)}">${escapeHtml(r.message)}</td>
+      <td>${escapeHtml((r.tools_used || []).join(', '))}</td>
+      <td>${r.latency ?? ''}</td>
+      <td>${r.success ? '✅' : '❌'}</td>
+    </tr>
+  `).join('');
+}
+
+if (saved) load();
+</script>
+</body>
+</html>

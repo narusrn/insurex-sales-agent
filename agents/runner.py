@@ -4,11 +4,37 @@ runs it, same split as the reference repo it's checked against. See
 implementation-plan.md §1.1.
 """
 import json
+import time
+from datetime import datetime, timezone
+from pathlib import Path
 
 from langchain_core.messages import AIMessageChunk, HumanMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from .orchestrator import CHECKPOINT_DB_PATH, build_graph
+
+RUNS_LOG_PATH = Path(__file__).resolve().parent.parent / "db" / "runs.jsonl"
+
+
+def _log_run(session_id: str, message: str, reply: str, tools_used: list[str], latency: float, error: str | None) -> None:
+    """One JSON line per turn — powers the /runs endpoint + dashboard. Best-effort:
+    a logging failure must never break the actual chat response."""
+    try:
+        RUNS_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "session_id": session_id,
+            "message": message,
+            "reply": reply,
+            "tools_used": tools_used,
+            "latency": round(latency, 2),
+            "success": error is None,
+            "error": error,
+        }
+        with RUNS_LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 async def astream_turn(session_id: str, user_message: str):
@@ -39,8 +65,14 @@ def _sse(data: dict, event: str | None = None) -> str:
 
 async def stream_events(session_id: str, user_message: str):
     """Ready-to-send SSE frames for one turn. Ends with event: done regardless of how
-    the stream ended (finally: block) — no agent_runs write; render_dialogue(trace)
-    (§3.8) already covers the human-readable log that would otherwise exist for."""
+    the stream ended (finally: block). Also logs one run record (db/runs.jsonl) for
+    the /runs + /dashboard endpoints — a basic usage-tracking addition, separate from
+    render_dialogue(trace) (§3.8), which is the detailed human-readable log, not a
+    queryable one."""
+    start = time.monotonic()
+    reply_parts: list[str] = []
+    tools_used: list[str] = []
+    error: str | None = None
     try:
         async for namespace, mode, chunk in astream_turn(session_id, user_message):
             if mode == "messages" and namespace == ():
@@ -54,6 +86,7 @@ async def stream_events(session_id: str, user_message: str):
                 # §8: "messages" mode also passes complete ToolMessages through as they're
                 # added to state — only AIMessageChunk is real streamed reply text.
                 if isinstance(token_chunk, AIMessageChunk) and token_chunk.content:
+                    reply_parts.append(token_chunk.content)
                     yield _sse({"type": "token", "content": token_chunk.content})
             elif mode == "updates" and namespace == ():
                 for node_name, node_output in chunk.items():
@@ -61,8 +94,13 @@ async def stream_events(session_id: str, user_message: str):
                         continue
                     last = (node_output.get("messages") or [None])[-1]
                     for tc in getattr(last, "tool_calls", None) or []:
+                        tools_used.append(tc["name"])
                         yield _sse({"stage": "working", "tool": tc["name"]}, event="status")
+    except Exception as e:
+        error = str(e)
+        raise
     finally:
+        _log_run(session_id, user_message, "".join(reply_parts), tools_used, time.monotonic() - start, error)
         yield _sse({"session_id": session_id}, event="done")
 
 

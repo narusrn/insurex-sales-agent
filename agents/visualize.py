@@ -12,7 +12,7 @@ from pathlib import Path
 
 from .orchestrator import build_graph
 
-PNG_PATH = Path(__file__).resolve().parent.parent / "graph.png"
+PNG_PATH = Path(__file__).resolve().parent.parent / "assets" / "graph.png"
 
 
 def print_mermaid() -> None:

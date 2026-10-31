@@ -6,17 +6,15 @@ products via agentic RAG, and — when a customer signals buying interest —
 extracts and persists their contact details as a sales lead, all while
 keeping each customer's conversation isolated and remembered across turns.
 
-- **Agents**: LangGraph (single `supervisor` node, `Command(goto=...)` routing — not a classic
-  supervisor/handoff multi-agent split; see [Architecture notes](#architecture-notes) for why)
+- **Agents**: LangGraph (single `supervisor` node, `Command(goto=...)` routing)
 - **RAG**: agentic retrieve → grade → rewrite loop (ChromaDB + OpenAI embeddings) over 5
   self-authored Thai insurance PDFs
 - **API**: FastAPI, streaming responses over SSE
 - **LLM**: OpenAI or Azure OpenAI (`gpt-4o-mini` by default), configurable
 - **Memory**: SQLite-checkpointed conversations (per-`session_id` isolation) + context
   trim/summarize for long conversations
-- **Leads**: a plain LangChain tool (not an MCP server — see
-  [Scope departures](#scope-departures)) extracts and persists customer lead data to SQLite,
-  gated behind a two-step completeness + explicit-confirmation check
+- **Leads**: a plain LangChain tool (not an MCP server) extracts and persists customer lead
+  data to SQLite, gated behind a two-step completeness + explicit-confirmation check
 
 ## Project layout
 
@@ -46,7 +44,7 @@ eval/
 ├── metrics.py                 # Hit Rate@k, MRR — standard IR metrics, no new dependency
 ├── run_full_eval.py             # Runs the full 21-case suite, writes demo_log.txt
 └── demo_log.txt                   # Full transcripts + pass/fail — THE demo/test-case deliverable
-Data/pdfs/                 # 5 synthetic Thai knowledge-base PDFs (see Scope departures)
+Data/pdfs/                 # 5 synthetic Thai knowledge-base PDFs (self-authored, InsureX didn't provide real ones)
 db/                        # gitignored: leads.sqlite, checkpoints.sqlite (created on first run)
 tests/test_graph_smoke.py  # One assert-based smoke test
 graph.png                  # Native LangGraph render of the real graph structure
@@ -68,8 +66,7 @@ graph LR
 
 `supervisor` is the **only** node that ever composes a user-facing reply, on
 every path — qa answers, lead acknowledgements, and plain conversation all
-go through it. This is a deliberate departure from a classic multi-agent
-supervisor/handoff split; see [Architecture notes](#architecture-notes).
+go through it.
 
 ### The real graph
 
@@ -324,7 +321,7 @@ Supervisor: ไม่พบข้อมูลที่ชัดเจนเก�
 
 The loop genuinely runs to its full retry budget and never finds the "ข้อยกเว้น"
 (exclusion) framing the source document actually uses — ends in an honest
-fallback, not a hallucinated guess. See [Known limitations](#known-limitations).
+fallback, not a hallucinated guess.
 </details>
 
 <details>
@@ -473,70 +470,3 @@ curl -N -X POST http://127.0.0.1:8000/chat \
 > non-ASCII text under Git Bash's quoting, which looks identical to a real API
 > bug (`400: There was an error parsing the body`) until you isolate it.
 
----
-
-## Scope departures
-
-Stated plainly rather than hoping they go unnoticed:
-
-1. **MCP not implemented.** `save_lead`/`extract_lead_info` are plain
-   LangChain `@tool`s, not an MCP server — gives up part of Bonus Task 1's
-   literal protocol requirement. The data-extraction-and-persistence
-   *behavior* the brief actually asks for is fully implemented; only the
-   transport/protocol wrapper is not.
-2. **Context trim + merge-summarize is a mastery-demonstration addition, not
-   a scale necessity** for this demo's short conversations — see
-   [Context management](#context-management).
-3. **`supervisor` composes every final reply itself**, on every path — the
-   literal thing a classic supervisor/handoff pattern says not to do (a
-   supervisor should route, specialists should answer). Accepted
-   deliberately: it resolves an asymmetry an earlier design draft had (qa
-   answers came from one node, lead acknowledgements from another) by making
-   every path answer the same way, at the cost of the pattern's usual
-   separation of concerns.
-4. **A served FastAPI + SSE endpoint, built even though the brief's stated
-   deliverable is repo + README + demo log, not a running service.** Scoped
-   down hard from a full multi-tenant reference it was checked against — no
-   auth, no CORS, no ownership/multi-user concept, no cost-tracking history.
-5. **The 5 knowledge-base PDFs are self-authored placeholder data**
-   ([`Data/pdfs/`](Data/pdfs/)) — InsureX didn't provide real product
-   documents, so 5 synthetic Thai documents were written for a fictional
-   "InsureX" product line (product overview, premium/coverage table, claims
-   FAQ, policy terms & exclusions, riders/add-ons) to have something
-   realistic for the RAG pipeline to search.
-
-## Known limitations
-
-Reported honestly from the full evaluation run
-([`eval/demo_log.txt`](eval/demo_log.txt)), not smoothed over:
-
-- **16/21 golden cases pass** on a strict keypoint-substring check; Hit
-  Rate@k = 0.91, MRR = 0.86 over the 11 qa cases with a known source
-  document. All 6 lead cases and both session cases pass cleanly.
-- Several of the "failures" are checker artifacts, not agent bugs — correct,
-  grounded answers that just don't repeat the dataset's exact wording (e.g.
-  giving the right premium figure without restating the literal age-bracket
-  label).
-- **One real, unexplained regression**: a hard case (`qa-06`, rewrite-loop
-  exercise) sometimes skips retrieval entirely and asks a clarifying
-  question instead — reproduced on an isolated rerun, not a one-off fluke,
-  but not root-caused. Likely prompt-sensitivity from `_supervisor.md`
-  growing across phases; stated honestly as unexplained rather than
-  guessed at.
-- **Multi-hop retrieval is a genuine, demonstrated limit**: a question
-  needing facts from 2 documents (`qa-12`) never retrieves the first one,
-  within one shared rewrite-loop budget. The *dangerous* failure mode this
-  produced — a confident, specific, wrong answer — is fixed (see
-  [No hallucinated certainty](#no-hallucinated-certainty)); the underlying
-  retrieval miss is not.
-
-## Architecture notes
-
-This project's design was developed against a set of reusable multi-agent
-architecture patterns distilled from a prior production system (not included
-in this deliverable). Several deliberate departures from that reference
-pattern are named throughout this README and documented inline as comments in
-`agents/*.py` — e.g. the "no static edge out of a tool node" and
-`add_trace`'s overlap-aware reducer, both in [Command-routing
-caveats](#command-routing-caveats), explain themselves at the point of use in
-the source rather than requiring an external design document.

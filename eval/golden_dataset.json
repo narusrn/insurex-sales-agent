@@ -1,0 +1,189 @@
+{
+  "_notes": "Golden evaluation set for the InsureX Sales Agent assessment. Built against the 5 synthetic PDFs in Data/pdfs/ (self-authored placeholder KB, not real InsureX product data). Covers the brief's 4 grading criteria: RAG Precision (qa_cases), Workflow Logic cycles/nodes/state (qa_cases marked rewrite_expected + the lead no-trigger case), Data Integrity (lead_cases), Code Quality / error handling (qa_cases marked out_of_scope + lead_cases marked incomplete). Grading a qa_case: check expected_source_docs appear among retrieved chunks, and expected_answer_keypoints all appear in the generated answer — don't require exact string match, this is a precision/recall check, not a diff.",
+
+  "qa_cases": [
+    {
+      "id": "qa-01", "difficulty": "easy",
+      "query": "InsureX Health Plus มีแผนอะไรบ้าง และวงเงินคุ้มครองเท่าไหร่?",
+      "expected_source_docs": ["01_product_overview.pdf"],
+      "expected_answer_keypoints": ["Bronze", "Silver", "Gold", "500,000", "1,000,000", "3,000,000"],
+      "rewrite_expected": false
+    },
+    {
+      "id": "qa-02", "difficulty": "easy",
+      "query": "ถ้าอายุ 35 ปี ซื้อ Life Secure ชำระเบี้ย 15 ปี เบี้ยประกันต่อปีเท่าไหร่?",
+      "expected_source_docs": ["02_premium_coverage_table.pdf"],
+      "expected_answer_keypoints": ["6,800 บาท", "อายุ 31-40"],
+      "rewrite_expected": false
+    },
+    {
+      "id": "qa-03", "difficulty": "easy",
+      "query": "เอกสารที่ต้องใช้ตอนเคลมประกันมีอะไรบ้าง?",
+      "expected_source_docs": ["03_claims_process_faq.pdf"],
+      "expected_answer_keypoints": ["ใบเสร็จรับเงินต้นฉบับ", "ใบรับรองแพทย์", "สำเนาบัตรประชาชน", "แบบฟอร์มเรียกร้องสินไหม"],
+      "rewrite_expected": false
+    },
+    {
+      "id": "qa-04", "difficulty": "easy",
+      "query": "ประกันสุขภาพมีระยะเวลารอคอยกี่วัน?",
+      "expected_source_docs": ["04_policy_terms_exclusions.pdf"],
+      "expected_answer_keypoints": ["30 วัน", "120 วัน"],
+      "rewrite_expected": false
+    },
+    {
+      "id": "qa-05", "difficulty": "easy",
+      "query": "Hospital Cash Rider ให้ค่าชดเชยสูงสุดวันละเท่าไหร่?",
+      "expected_source_docs": ["05_riders_addons.pdf"],
+      "expected_answer_keypoints": ["500", "1,000", "2,000", "ICU", "2 เท่า"],
+      "rewrite_expected": false
+    },
+    {
+      "id": "qa-06", "difficulty": "hard",
+      "query": "ลูกค้าท้องแล้วเคลมค่าคลอดได้ไหม",
+      "expected_source_docs": ["04_policy_terms_exclusions.pdf"],
+      "expected_answer_keypoints": ["ไม่คุ้มครอง", "ตั้งครรภ์", "สัญญาเพิ่มเติม"],
+      "rewrite_expected": true,
+      "note": "เทสที่ยืนยันแล้วจริง (Phase 2.4): rewrite loop fire จริง (retries=2) แต่ไม่ recover ภายใน budget — คำรีไรท์ของโมเดลเน้น 'ค่าคลอด/ครอบคลุม' ไม่ใช่ 'ข้อยกเว้น' (คำที่ doc4 ใช้จริง) จบที่ fallback ตรงๆ ไม่เดาคำตอบ — เป็นหลักฐานว่า loop ทำงานถูกแต่ผล 'ไม่ recover' ก็เป็นผลที่ยอมรับได้ (ดีกว่า hallucinate)"
+    },
+    {
+      "id": "qa-07", "difficulty": "hard",
+      "query": "คนอายุ 68 ยังทำประกันสุขภาพแบบไม่ต้องตรวจร่างกายได้ไหม",
+      "expected_source_docs": ["01_product_overview.pdf"],
+      "expected_answer_keypoints": ["Care Senior", "50-75 ปี", "ไม่ต้องตรวจสุขภาพ"],
+      "rewrite_expected": false,
+      "note": "แก้จาก true เป็น false ตามผลจริง (Phase 2.4): ตอบถูกครบ 3/3 keypoint ตั้งแต่รอบแรก ไม่ต้อง rewrite เลย — สมมติฐานเดิมว่า 'ไม่เอ่ยชื่อผลิตภัณฑ์ตรงๆ จะดึงยาก' ผิด เพราะ embedding จับความหมายได้ดีกว่าที่คาด ไม่ใช่เคสที่ควรใช้พิสูจน์ rewrite loop"
+    },
+    {
+      "id": "qa-08", "difficulty": "hard",
+      "query": "เป็นมะเร็งแล้วเคลมโรคร้ายแรงได้เลยไหม หรือต้องรอ",
+      "expected_source_docs": ["05_riders_addons.pdf"],
+      "expected_answer_keypoints": ["90 วัน", "มะเร็ง", "ระยะเวลารอคอย"],
+      "rewrite_expected": false,
+      "note": "แก้จาก true เป็น false ตามผลจริง (Phase 2.4): ตอบถูกครบ 3/3 keypoint ตั้งแต่รอบแรก ดึง doc05 ถูกต้องไม่ปนกับ doc04 — ไม่ต้อง rewrite เลย เหตุผลเดียวกับ qa-07"
+    },
+    {
+      "id": "qa-09", "difficulty": "hard",
+      "query": "ลาไปเล่นสกีแล้วบาดเจ็บ ประกันจ่ายไหม",
+      "expected_source_docs": ["04_policy_terms_exclusions.pdf"],
+      "expected_answer_keypoints": ["ไม่ได้ระบุชัดเจน", "กีฬาผาดโผนอื่นๆ"],
+      "rewrite_expected": true,
+      "note": "สกีไม่อยู่ในรายการข้อยกเว้นที่ระบุชื่อตรงๆ (มีแต่ดำน้ำลึก/กระโดดร่ม/ปีนเขา/แข่งรถ/แข่งเรือ) — คำตอบที่ดีต้องยอมรับความไม่แน่ใจ ไม่ฟันธงเดา ถือเป็นเทสต์ anti-hallucination"
+    },
+    {
+      "id": "qa-10", "difficulty": "out_of_scope",
+      "query": "บริษัท InsureX มีประกันรถยนต์ไหม",
+      "expected_source_docs": [],
+      "expected_answer_keypoints": ["ไม่พบข้อมูล"],
+      "rewrite_expected": true,
+      "note": "ไม่มีผลิตภัณฑ์ประกันรถยนต์ใน KB เลย — ต้อง trigger fallback message หลัง retries หมด ไม่ใช่กุคำตอบ"
+    },
+    {
+      "id": "qa-11", "difficulty": "out_of_scope",
+      "query": "เบี้ยประกันสามารถผ่อนด้วย QR พร้อมเพย์ได้ไหม",
+      "expected_source_docs": ["02_premium_coverage_table.pdf"],
+      "expected_answer_keypoints": ["รายปี", "รายเดือน", "บัตรเครดิต"],
+      "rewrite_expected": true,
+      "note": "KB พูดถึงช่องทางชำระแค่บัตรเครดิตตัดอัตโนมัติ ไม่มี QR — คำตอบที่ดีต้องไม่ยืนยันว่า QR ใช้ได้ (ไม่มีข้อมูลระบุ) ไม่ใช่เดาว่าใช้ได้เพราะฟังดูสมเหตุสมผล"
+    },
+    {
+      "id": "qa-12", "difficulty": "multi_hop",
+      "query": "ถ้าซื้อ Life Secure แล้วอยากซื้อ PA Rider เพิ่ม อายุไม่เกินกี่ปี",
+      "expected_source_docs": ["01_product_overview.pdf", "05_riders_addons.pdf"],
+      "expected_answer_keypoints": ["65 ปี", "70 ปี", "ตามกรมธรรม์หลัก"],
+      "rewrite_expected": true,
+      "note": "ต้องรวมข้อมูลจาก 2 เอกสาร: อายุรับประกันหลักของ Life Secure (doc1) + เงื่อนไข rider อายุตามกรมธรรม์หลักและสิ้นสุดที่ 70 ปี (doc5)"
+    },
+    {
+      "id": "qa-13", "difficulty": "small_talk",
+      "query": "สวัสดีครับ",
+      "expected_source_docs": [],
+      "expected_answer_keypoints": [],
+      "rewrite_expected": false,
+      "note": "ไม่มีคำถามเกี่ยวกับความรู้ และไม่มีสัญญาณสนใจซื้อ — supervisor ไม่ควรเรียก tool ไหนเลย (ไม่ handoff_to_kb_retriever ไม่ save_lead) ตอบกลับตรงๆ ในรอบแรก (no-tool-call branch, §2 ของ implementation-plan.md) — เคสนี้เป็นเคสเดียวที่ไม่ผ่าน handoff_to_kb_retriever เลย"
+    }
+  ],
+
+  "lead_cases": [
+    {
+      "id": "lead-01", "scenario": "complete_info_with_confirmation",
+      "steps": [
+        {"turn": 1, "conversation": "สวัสดีค่ะ หนูชื่อสมหญิง ใจดี อาชีพพยาบาล เงินเดือนประมาณ 35,000 บาท สนใจแผน Health Plus Silver ค่ะ เบอร์โทรติดต่อ 089-123-4567"},
+        {"turn": 2, "conversation": "ใช่ค่ะ ถูกต้องแล้ว"}
+      ],
+      "expected_trigger": true,
+      "expected_lead": {"name": "สมหญิง ใจดี", "occupation": "พยาบาล", "income": "35,000 บาท/เดือน", "phone": "089-123-4567", "interested_product": "Health Plus Silver"},
+      "expected_save_lead_called": true,
+      "expected_save_at_turn": 2,
+      "note": "turn 1: ข้อมูลครบทุก field แล้ว แต่ save_lead ต้องคืน 'Data complete but not yet confirmed' ไม่ใช่บันทึกทันที — supervisor ต้องทวนข้อมูลแล้วถามยืนยันในคำตอบ turn 1 ไม่ใช่เรียก save_lead(confirmed=True) เอง turn 2: ลูกค้าตอบ 'ใช่ค่ะ' → เรียก save_lead(confirmed=True) อีกครั้งถึงจะบันทึกจริง"
+    },
+    {
+      "id": "lead-02", "scenario": "missing_phone",
+      "conversation": "ผมชื่อวิชัย ทำงานวิศวกร เงินเดือน 60,000 สนใจ Life Secure ครับ",
+      "expected_trigger": true,
+      "expected_lead": {"name": "วิชัย", "occupation": "วิศวกร", "income": "60,000 บาท/เดือน", "phone": null, "interested_product": "Life Secure"},
+      "expected_save_lead_called": false,
+      "note": "เบอร์โทรหาย — agent ต้องถามเพิ่ม ไม่ใช่บันทึก lead ที่ไม่ครบลง DB (interested_product มีครบแล้วแต่ไม่พอ เพราะ field ที่จำเป็น 4 ตัวหลักยังขาดเบอร์โทร)"
+    },
+    {
+      "id": "lead-03", "scenario": "no_trigger_pure_question",
+      "conversation": "ประกันสุขภาพคุ้มครองอะไรบ้างคะ",
+      "expected_trigger": false,
+      "expected_lead": null,
+      "expected_save_lead_called": false,
+      "note": "คำถามข้อมูลธรรมดา ไม่มีสัญญาณสนใจซื้อ — supervisor ต้องไม่เรียก handoff_to_lead_collector เลย"
+    },
+    {
+      "id": "lead-04", "scenario": "trigger_but_mostly_missing",
+      "conversation": "พอดีผมเป็นวิศวกร สนใจอยากซื้อประกันเพิ่มครับ",
+      "expected_trigger": true,
+      "expected_lead": {"name": null, "occupation": "วิศวกร", "income": null, "phone": null, "interested_product": null},
+      "expected_save_lead_called": false,
+      "note": "trigger ทำงานถูก (มีคำว่า 'สนใจอยากซื้อ') แต่ขาดชื่อ/เงินเดือน/เบอร์ — เทสว่า agent ถามต่อแบบไม่เดา ไม่ยัด placeholder ลง DB"
+    },
+    {
+      "id": "lead-05", "scenario": "multi_turn_completion_no_retrigger",
+      "steps": [
+        {"turn": 1, "conversation": "ผมชื่อประยุทธ ทำงานขับแท็กซี่ เงินเดือนประมาณ 20,000 สนใจ Life Secure ครับ"},
+        {"turn": 2, "conversation": "089-999-8888"},
+        {"turn": 3, "conversation": "ถูกต้องครับ"}
+      ],
+      "expected_trigger": true,
+      "expected_lead": {"name": "ประยุทธ", "occupation": "ขับแท็กซี่", "income": "20,000 บาท/เดือน", "phone": "089-999-8888", "interested_product": "Life Secure"},
+      "expected_save_lead_called": true,
+      "expected_save_at_turn": 3,
+      "note": "เทสที่เจาะจุดที่ไม่มี code-level fallback เหลืออีกแล้ว (implementation-plan.md §3.2/§7): turn 2 มีแค่เบอร์โทร ไม่มีคำว่า 'สนใจ' ซ้ำเลย — ไม่มี entry-check แยกต่างหากในดีไซน์นี้แล้ว ต้องพึ่ง supervisor สังเกตเองจาก messages history ว่า turn ก่อนมันเพิ่งเรียก save_lead แล้วได้ 'Missing: phone' กลับมา แล้วเรียกซ้ำด้วยเบอร์ที่ได้ตาม instruction ที่เขียนไว้ใน _supervisor.md (§3.2) turn 3: ข้อมูลครบแล้วหลัง turn 2 แต่ยังไม่ยืนยัน ต้องรอ turn 3 ถึงบันทึกจริง (เหตุผลเดียวกับ lead-01) — ถ้าพลาดเคสนี้คือ finding จริงเรื่อง prompt ไม่ใช่บั๊ก code"
+    },
+    {
+      "id": "lead-06", "scenario": "customer_corrects_instead_of_confirming",
+      "steps": [
+        {"turn": 1, "conversation": "ผมชื่อสมชาย ทำงานช่างไฟฟ้า เงินเดือน 25,000 สนใจ Health Plus ครับ เบอร์ 089-111-2222"},
+        {"turn": 2, "conversation": "เบอร์ผิดครับ ที่จริงคือ 089-333-4444"},
+        {"turn": 3, "conversation": "ใช่ครับ ถูกต้องแล้ว"}
+      ],
+      "expected_trigger": true,
+      "expected_lead": {"name": "สมชาย", "occupation": "ช่างไฟฟ้า", "income": "25,000 บาท/เดือน", "phone": "089-333-4444", "interested_product": "Health Plus"},
+      "expected_save_lead_called": true,
+      "expected_save_at_turn": 3,
+      "note": "turn 2 คือ 'การแก้ไข' ไม่ใช่ 'การยืนยัน' — ห้าม supervisor ตีความคำตอบนี้เป็น confirmed=True แล้วบันทึกเบอร์เก่า (089-111-2222) หรือแม้แต่เบอร์ใหม่โดยไม่ถามยืนยันซ้ำ ต้องทวนเบอร์ใหม่แล้วถามอีกรอบใน turn 2's reply ก่อน ถึง turn 3 ที่ลูกค้ายืนยันจริงจึงบันทึกด้วยเบอร์ที่ถูกต้อง (089-333-4444) — ถ้า agent บันทึกเบอร์ผิดหรือบันทึกไม่รอยืนยันซ้ำ คือบั๊ก Data Integrity ตรงๆ"
+    }
+  ],
+
+  "session_cases": [
+    {
+      "id": "session-01", "scenario": "context_isolation",
+      "steps": [
+        {"session_id": "sess-A", "turn": "หนูชื่อสมหญิง สนใจ Health Plus ค่ะ"},
+        {"session_id": "sess-B", "turn": "ชื่อฉันคืออะไร"}
+      ],
+      "expectation": "sess-B's reply must NOT reference 'สมหญิง' or anything from sess-A — proves thread_id separation actually isolates context, not just a shared in-memory store that happens to work in a single-session demo"
+    },
+    {
+      "id": "session-02", "scenario": "memory_recall_same_session",
+      "steps": [
+        {"session_id": "sess-C", "turn": "Health Plus มีแผนอะไรบ้าง"},
+        {"session_id": "sess-C", "turn": "แผนที่ถูกที่สุดคืออะไร"}
+      ],
+      "expectation": "second turn's 'ถูกที่สุด' must resolve against Health Plus (from turn 1 in the same thread), i.e. answer Bronze's premium — proves checkpointer recall works within a session, not just isolation across sessions"
+    }
+  ]
+}

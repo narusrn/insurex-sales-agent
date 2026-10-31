@@ -1,0 +1,12 @@
+langchain
+langgraph
+langgraph-checkpoint-sqlite
+langchain-openai
+langchain-chroma
+langchain-text-splitters
+chromadb
+pypdf
+pydantic
+python-dotenv
+fastapi
+uvicorn[standard]

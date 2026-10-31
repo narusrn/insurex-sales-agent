@@ -9,13 +9,13 @@ from agents.runner import RUNS_LOG_PATH
 
 from ..auth import require_api_key
 
-router = APIRouter(dependencies=[Depends(require_api_key)])
+router = APIRouter()
 
 MAX_RUNS = 500
 
 
 @router.get("/runs")
-async def runs() -> list[dict]:
+async def runs(api_key: str = Depends(require_api_key)) -> list[dict]:
     if not RUNS_LOG_PATH.exists():
         return []
     records = []

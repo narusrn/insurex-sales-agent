@@ -43,7 +43,7 @@ except Exception:
     _has_secrets = False
 if _has_secrets:
     for _key in (
-        "LLM_PROVIDER", "OPENAI_API_KEY", "OPENAI_MODEL",
+        "LLM_PROVIDER", "OPENAI_API_KEY", "OPENAI_MODEL", "API_KEY",
         "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_DEPLOYMENT",
         "EMBEDDING_MODEL", "CHUNK_SIZE", "CHUNK_OVERLAP",
         "RETRIEVER_TOP_K", "RETRIEVER_MAX_REWRITES",

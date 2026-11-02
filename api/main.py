@@ -35,6 +35,7 @@ from agents.orchestrator import CHECKPOINT_DB_PATH, build_graph
 
 from .auth import require_api_key
 from .routes.chat import router as chat_router
+from .routes.leads import router as leads_router
 from .routes.runs import router as runs_router
 from .schemas.error import ErrorDetail, ErrorResponse
 
@@ -69,6 +70,7 @@ app = FastAPI(
     lifespan=lifespan,
     openapi_tags=[
         {"name": "chat", "description": "Send messages and read conversation history."},
+        {"name": "leads", "description": "Customers who've shown buying interest."},
         {"name": "runs", "description": "Per-turn usage, cost, and trace logs."},
         {"name": "pages", "description": "Static HTML pages — unauthenticated, not JSON APIs."},
         {"name": "meta", "description": "Service-level checks, outside the API version."},
@@ -112,6 +114,7 @@ async def health(request: Request) -> JSONResponse:
 
 
 app.include_router(chat_router, prefix="/api/v1", dependencies=[Depends(require_api_key)])
+app.include_router(leads_router, prefix="/api/v1", dependencies=[Depends(require_api_key)])
 app.include_router(runs_router, prefix="/api/v1", dependencies=[Depends(require_api_key)])
 
 

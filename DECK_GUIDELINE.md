@@ -198,17 +198,21 @@ written later, update these citations to point at it.
    are both in the same record, one click away in the dashboard's expanded
    row view — that's what `dashboard-expanded.png` is a screenshot of.
 
-11. **Two ways to drive it** — `assets/chat-test-screenshot.png`
+11. **Three ways to drive it** — `assets/chat-test-screenshot.png`
     (`/api/v1/chat-test`, a self-contained HTML page with real token-by-token
-    SSE streaming, no backend framework needed to open it) and
-    `/api/v1/docs` (Swagger, standardized to match
+    SSE streaming against a *running FastAPI server*, no backend framework
+    needed to open it), `/api/v1/docs` (Swagger, standardized to match
     `narusrn/support-ticket-triage-service`'s own `api/main.py` pattern —
     `/api/v1` prefix on every real route + docs, one shared checkpointer
     connection for the app's lifetime instead of one per request, structured
     `{"error": {"code","message"}}` responses on every failure, `GET
-    /health`). Worth a one-line mention: an earlier Streamlit app was built,
-    then deliberately removed in favor of this simpler static page — see
-    slide 13's scope note.
+    /health`), and `streamlit_app.py` — a separate chat UI deployable
+    standalone to Streamlit Cloud, embedding the agent *in-process* instead
+    of calling the API over HTTP (no server needed on Cloud; `st.cache_
+    resource` plays the same one-shared-connection role api/main.py's
+    lifespan does). If deployed by presentation time, this is the natural
+    "here's a link, go try it yourself" slide — put the live Streamlit Cloud
+    URL here once it exists, don't invent one.
 
 12. **What I'd change for production** — not pulled from a `WRITEUP.md`
     (none exists yet), stated plainly here instead:
@@ -229,11 +233,11 @@ written later, update these citations to point at it.
 
 13. **Close** — repo link, one line on scope: what the brief asked for vs.
     what was built on request beyond it — the usage dashboard, the live chat
-    test page (replacing an earlier Streamlit app, removed on request), the
-    per-turn cost/trace logging, and standardizing the API layer
-    (`/api/v1` everywhere, shared lifespan connection, structured errors,
-    `/health`) against a second reference project partway through — not
-    just a feature list, the reasoning for each lives in the relevant
+    test page, the standalone Streamlit Cloud deploy, the per-turn
+    cost/trace logging, the LLM-as-judge eval layer, and standardizing the
+    API layer (`/api/v1` everywhere, shared lifespan connection, structured
+    errors, `/health`) against a second reference project partway through —
+    not just a feature list, the reasoning for each lives in the relevant
     `README.md` section cited above.
 
 ## What to leave out

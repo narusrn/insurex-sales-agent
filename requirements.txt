@@ -11,3 +11,9 @@ python-dotenv
 fastapi
 uvicorn[standard]
 pytest
+streamlit
+# Streamlit Cloud's base image ships an old system sqlite3 that chromadb doesn't
+# support; pysqlite3-binary's bundled modern sqlite3 is the standard fix (see
+# streamlit_app.py's own comment). Linux-only wheels -- marker skips it on Windows/
+# macOS local dev, where chromadb already works against the system sqlite3 directly.
+pysqlite3-binary; sys_platform == "linux"

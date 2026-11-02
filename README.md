@@ -39,7 +39,7 @@ api/
 ├── main.py                 # FastAPI app, lifespan (one shared checkpointer), error handlers
 ├── auth.py                   # require_api_key — X-API-Key via fastapi.security.APIKeyHeader
 ├── routes/                     # chat.py, runs.py — thin, hand off to agents.runner
-└── schemas/                      # chat.py, runs.py, error.py — request/response/error models
+└── schemas/                      # chat.py, runs.py, leads.py, error.py — request/response/error models
 eval/
 ├── golden_dataset.json     # 13 qa_cases + 6 lead_cases + 2 session_cases
 ├── metrics.py                 # Hit Rate@k, MRR — standard IR metrics, no new dependency
@@ -50,6 +50,7 @@ Data/pdfs/                 # 5 synthetic Thai knowledge-base PDFs (self-authored
 db/                        # gitignored: leads.sqlite, checkpoints.sqlite (created on first run)
 tests/test_graph_smoke.py  # One assert-based smoke test
 assets/                    # Screenshots + the graph render, used by this README
+streamlit_app.py           # Chat UI deployable standalone to Streamlit Cloud (runs the agent in-process)
 ```
 
 ## Architecture overview
@@ -263,6 +264,7 @@ navigation can't attach a custom header, so each asks for the key client-side
 | `GET` | `/health` | — (public) | Liveness check: graph compiled, API keys configured |
 | `POST` | `/api/v1/chat` | `X-API-Key` | The chat endpoint (below) |
 | `GET` | `/api/v1/chat/{session_id}` | `X-API-Key` | That session's chat history, `[{"role": "user"/"assistant", "content": ...}, ...]` — reads straight from the checkpointer, `[]` for an unused `session_id` |
+| `GET` | `/api/v1/leads` | `X-API-Key` | Every customer lead saved so far (`db/leads.sqlite`, newest first) — who's shown buying interest |
 | `GET` | `/api/v1/runs` | `X-API-Key` | JSON dump of `db/runs.jsonl` (newest first, capped to 500) — powers `/api/v1/dashboard` |
 | `GET` | `/api/v1/dashboard` | — (public) | Usage dashboard: total runs, success rate, avg latency, a table of every run |
 | `GET` | `/api/v1/chat-test` | — (public) | A live chat UI for manually testing `/api/v1/chat` (below) |
@@ -355,6 +357,39 @@ running. `session_id` is generated client-side (`crypto.randomUUID()`); "เร�
 บทสนทนาใหม่" starts a fresh one.
 
 ![Live chat test](assets/chat-test-screenshot.png)
+
+---
+
+## Streamlit Cloud demo
+
+`streamlit_app.py` — a chat UI deployable standalone to Streamlit Cloud,
+separate from `chat_test.html` above: that page talks to a *running FastAPI
+server* over HTTP/SSE, this app embeds the LangGraph agent directly in the
+Streamlit process itself (no server needed on Cloud), same idea as
+`api/main.py`'s own lifespan — one shared checkpointer connection, compiled
+once — just via `st.cache_resource` instead of an asgi lifespan.
+
+Run locally the same way any Streamlit app runs:
+```bash
+streamlit run streamlit_app.py
+```
+
+**Deploying to Streamlit Cloud**: point it at this repo, `streamlit_app.py`
+as the entry point, then set these under the app's **Settings → Secrets**
+(Cloud has no `.env` file — `streamlit_app.py` copies anything set here into
+`os.environ` at startup, before any other module reads it):
+```toml
+OPENAI_API_KEY = "sk-..."
+# or the Azure block + LLM_PROVIDER = "azure", same variables as .env.example
+```
+`requirements.txt` includes `pysqlite3-binary` behind a `sys_platform ==
+"linux"` marker specifically for Cloud's deploy environment — its base image
+ships a system `sqlite3` too old for `chromadb`, a known, common
+Streamlit Cloud + Chroma incompatibility, not specific to this project;
+`streamlit_app.py`'s own first few lines swap in the bundled modern one
+before `chromadb` ever imports. Local Windows/macOS dev is unaffected (the
+marker skips installing it there, and the system `sqlite3` is new enough
+already).
 
 ---
 
